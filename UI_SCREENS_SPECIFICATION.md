@@ -135,6 +135,9 @@ Each brand has its own configuration for chatbot behavior, moderation, lead capt
 |---------|---------|
 | Response length | Dropdown: Short / Medium / Long |
 | Max tokens per response | Number input |
+| RAG similarity threshold | Number input (e.g., 0.7). Results below this score are discarded — chatbot uses fallback instead of guessing. |
+| Recommendation Top N | Number input (default 3). How many product recommendations to show when multiple match. |
+| Session timeout | Number input in minutes (e.g., 30). How long a user session stays active after last message. |
 
 **Messages**
 | Element | Details |
@@ -166,6 +169,13 @@ Each brand has its own configuration for chatbot behavior, moderation, lead capt
 | Element | Details |
 |---------|---------|
 | Messages per user per minute | Number input |
+
+**Data Retention**
+| Element | Details |
+|---------|---------|
+| Conversation retention period | Number input in days (e.g., 90). Conversations older than this are automatically deleted. |
+| Brute-force lockout threshold | Number input — how many failed login attempts before account is locked |
+| Lockout duration | Number input in minutes |
 
 **Emergency Controls**
 | Element | Details |
@@ -344,6 +354,7 @@ Each brand has its own voice and personality. All changes take effect immediatel
 | For Exclusion | Product selector + "Do not recommend for:" + skin type or concern selector |
 | For Conflict | Product A selector + Product B selector + Reason text. e.g., "Retinol and Vitamin C should not be used together" |
 | For Priority | Product selector + Priority score number |
+| For Suitability Matrix | Product selector + multi-axis scoring grid: Skin Type (score per type), Concern (score per concern), Sensitivity Level (score), Routine Step (which step this product fits: Cleanse/Tone/Serum/Moisturize etc.) |
 | Active toggle | |
 
 **Rule Testing**
@@ -465,12 +476,15 @@ Each brand has its own system prompt (the instructions given to the AI). Admins 
 | Element | Details |
 |---------|---------|
 | Header | Session ID, Channel, Brand, Start/End time |
+| Session state panel | Shows what the chatbot remembered during this session: skin type, concerns, preferences, products recommended |
 | Message thread | Chronological messages — user messages on one side, AI responses on the other, with timestamps |
 | "Flag for Review" button | With optional reason text field |
 | "Unflag" button | |
+| "Delete Conversation" button | GDPR right to erasure. Confirmation: "This will permanently delete this conversation and all its messages." |
 | RAG retrieval detail | Expandable: shows which knowledge base content was used for each AI response, with relevance scores |
 | Compliance detail | Expandable: shows if any response was blocked or replaced and why |
 | Moderation detail | Expandable: shows if any user input was blocked and why |
+| Recommendation rule detail | Expandable: shows which rules were applied, matched products, excluded products, and reasons |
 
 ---
 
@@ -600,7 +614,7 @@ Secrets are API keys and tokens. They are never shown in plain text.
 **Add Secret Form**
 | Element | Details |
 |---------|---------|
-| Secret type | Dropdown: Anthropic API Key / Embeddings API Key / Meta WhatsApp Token / Meta Instagram Token / Webhook Secret |
+| Secret type | Dropdown: Anthropic API Key / Embeddings API Key / S3 Credentials / Meta WhatsApp Token / Meta Instagram Token / Webhook Secret |
 | Brand | Dropdown: System Default / specific brand |
 | Secret value | Password field — value is NOT retained after submit |
 | "Save" button | |
@@ -660,7 +674,35 @@ Action types: Created, Updated, Deleted, Published, Restored, Overridden, Enable
 
 ---
 
-### 29. Embedding Status
+### 29. RAG Retrieval Logs
+
+Shows which knowledge base content was retrieved for each user query, with relevance scores. Useful for debugging why the chatbot gave a specific answer or why it used fallback.
+
+| Element | Details |
+|---------|---------|
+| Brand selector | Dropdown |
+| Retrieval log table | Columns: Timestamp, User Query (truncated), Chunks Retrieved Count, Top Similarity Score, Hit Threshold (Yes/No) |
+| Filters | Brand, Date range, Below-threshold only toggle |
+| Search | Search within user queries |
+| Detail view | Full user query, list of retrieved chunks with: type (Product/FAQ/Routine), name, similarity score, text excerpt |
+| "No context found" indicator | Highlights queries where no chunks met the similarity threshold |
+
+---
+
+### 30. Recommendation Rule Logs
+
+Shows every recommendation rule execution — what rules were applied, what products matched, what was excluded and why.
+
+| Element | Details |
+|---------|---------|
+| Brand selector | Dropdown |
+| Rule log table | Columns: Timestamp, User Input Summary, Skin Type, Concerns, Matched Products Count, Excluded Count |
+| Filters | Brand, Date range, Skin type, Had exclusions toggle |
+| Detail view | Full input, skin profile used, all matched products (ranked), all excluded products with reason (which rule blocked them), applied filters |
+
+---
+
+### 31. Embedding Status
 
 Shows whether content (products, FAQs, routines) has been successfully synced to the AI knowledge base.
 
@@ -676,7 +718,7 @@ Shows whether content (products, FAQs, routines) has been successfully synced to
 
 ---
 
-### 30. Bot Protection
+### 32. Bot Protection
 
 | Element | Details |
 |---------|---------|
@@ -688,7 +730,25 @@ Shows whether content (products, FAQs, routines) has been successfully synced to
 
 ---
 
-### 31. Human Agent Inbox
+### 33. Notification Center
+
+A notification bell icon in the top-right header of the admin panel. Shows alerts that need admin attention.
+
+| Element | Details |
+|---------|---------|
+| Notification bell icon | In admin panel header, with unread count badge |
+| Notification dropdown/panel | List of recent notifications |
+| **Notification types:** | |
+| Embedding failed | "{Product/FAQ name} failed to sync to knowledge base. [Retry]" |
+| Repeated abuse detected | "Repeated abuse from user {masked ID} on {brand}. [View Logs] [Block User]" |
+| AI API failure | "AI API call failed for {brand}. Fallback message served." |
+| Brand disabled/safe mode | "{Brand} was switched to safe mode by {admin}." |
+| Mark as read | Per notification or "Mark all as read" |
+| View all | Link to full notification history |
+
+---
+
+### 34. Human Agent Inbox
 
 When a user requests a human or the AI cannot answer confidently, the conversation is routed to a human agent.
 
@@ -705,7 +765,7 @@ When a user requests a human or the AI cannot answer confidently, the conversati
 
 ---
 
-### 32. CRM & Webhook Settings
+### 35. CRM & Webhook Settings
 
 | Element | Details |
 |---------|---------|
@@ -717,7 +777,7 @@ When a user requests a human or the AI cannot answer confidently, the conversati
 
 ---
 
-### 33. SEO & FAQ Pages
+### 36. SEO & FAQ Pages
 
 | Element | Details |
 |---------|---------|
@@ -729,7 +789,7 @@ When a user requests a human or the AI cannot answer confidently, the conversati
 
 ---
 
-### 34. A/B Testing
+### 37. A/B Testing
 
 | Element | Details |
 |---------|---------|
@@ -742,7 +802,7 @@ When a user requests a human or the AI cannot answer confidently, the conversati
 
 ---
 
-### 35. Change Password
+### 38. Change Password
 
 Available to all logged-in users.
 
@@ -892,6 +952,7 @@ Displayed when the AI cannot answer safely, a compliance rule is triggered, or t
 ### Super Admin Sidebar
 
 ```
+[Notification Bell Icon - top right header]
 Dashboard
 Brands
   - All Brands
@@ -916,6 +977,8 @@ Logs
   - Error Logs
   - Compliance Logs
   - Moderation Logs
+  - RAG Retrieval Logs
+  - Recommendation Rule Logs
 Users
 Secrets
 Bot Protection
@@ -930,6 +993,7 @@ Settings
 ### Admin Sidebar (brand-scoped)
 
 ```
+[Notification Bell Icon - top right header]
 Dashboard
 [Only Assigned Brands visible] ->
   - Brand Config
@@ -947,13 +1011,17 @@ Dashboard
   - Leads
   - Embedding Status
 Logs (own brands only)
+  - My Activity Log
+  - Error Logs (own brands only)
   - Compliance Logs
   - Moderation Logs
+  - RAG Retrieval Logs
+  - Recommendation Rule Logs
 Settings
   - Change Password
 ```
 
-**Hidden from Admin**: Brand creation/deletion, Users, Secrets, Bot Protection, Admin Activity Logs, Error Logs (system-wide), Agent Inbox management, CRM, SEO, A/B Testing
+**Hidden from Admin**: Brand creation/deletion, Users, Secrets, Bot Protection, System-wide Admin Activity Logs, Agent Inbox management, CRM, SEO, A/B Testing
 
 ---
 
@@ -999,12 +1067,15 @@ Settings
 | Error Logs | 1 |
 | Compliance Logs | 1 |
 | Moderation Logs | 1 |
+| RAG Retrieval Logs | 1 |
+| Recommendation Rule Logs | 1 |
 | Embedding Status | 1 |
 | Bot Protection | 1 |
+| Notification Center | 1 |
 | Human Agent Inbox | 1 |
 | CRM & Webhooks | 1 |
 | SEO & FAQ Pages | 1 |
 | A/B Testing | 1 |
-| **Admin Panel Total** | **35** |
+| **Admin Panel Total** | **38** |
 | Chat Widget (Bubble, Welcome, Chat, Quiz, Product Card, Routine, Lead Form, Fallback, Error) | **9** |
-| **Grand Total** | **44** |
+| **Grand Total** | **47** |
