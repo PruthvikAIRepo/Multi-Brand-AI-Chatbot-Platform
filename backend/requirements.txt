@@ -1,0 +1,37 @@
+# FastAPI & Server
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+python-multipart==0.0.20
+
+# Database
+sqlalchemy[asyncio]==2.0.41
+asyncpg==0.31.0
+alembic==1.15.2
+pgvector==0.3.6
+
+# Auth & Security
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.3.0
+cryptography==44.0.3
+
+# Settings & Validation
+pydantic==2.11.4
+pydantic-settings==2.9.1
+email-validator==2.2.0
+
+# Redis & Celery
+redis>=5.0.0,<6.0.0
+celery[redis]==5.5.2
+
+# HTTP Client (for Embeddings API, external calls)
+httpx==0.28.1
+
+# AWS S3
+boto3==1.38.29
+
+# Anthropic Claude API
+anthropic==0.52.0
+
+# Utilities
+python-dotenv==1.1.0
