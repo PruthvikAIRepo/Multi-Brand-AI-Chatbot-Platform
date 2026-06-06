@@ -1,8 +1,8 @@
-"""initial_schema_35_tables
+"""initial_schema_35_tables_v2
 
-Revision ID: 3911ed6c22f7
+Revision ID: 742ffa828434
 Revises: 
-Create Date: 2026-06-06 21:15:54.478416
+Create Date: 2026-06-06 21:26:21.255783
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 import pgvector.sqlalchemy
 
 # revision identifiers, used by Alembic.
-revision: str = '3911ed6c22f7'
+revision: str = '742ffa828434'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -68,9 +68,9 @@ def upgrade() -> None:
     sa.Column('ip_address', sa.String(length=45), nullable=True),
     sa.Column('before_state', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('after_state', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -150,7 +150,7 @@ def upgrade() -> None:
     sa.Column('session_id', sa.String(length=255), nullable=False),
     sa.Column('channel', sa.Enum('WEBSITE', 'WHATSAPP', 'INSTAGRAM', name='channel_type'), nullable=False),
     sa.Column('user_identifier', sa.Text(), nullable=True),
-    sa.Column('session_state', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('session_state', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=True),
     sa.Column('is_flagged', sa.Boolean(), nullable=True),
     sa.Column('flag_reason', sa.Text(), nullable=True),
     sa.Column('current_handler', sa.Enum('AI', 'HUMAN', name='conversation_handler'), nullable=True),
@@ -159,7 +159,7 @@ def upgrade() -> None:
     sa.Column('escalation_reason', sa.Text(), nullable=True),
     sa.Column('escalated_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('assigned_agent_id', sa.UUID(), nullable=True),
-    sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('ended_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -173,6 +173,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_conversations_id'), 'conversations', ['id'], unique=False)
     op.create_index(op.f('ix_conversations_is_flagged'), 'conversations', ['is_flagged'], unique=False)
     op.create_index(op.f('ix_conversations_session_id'), 'conversations', ['session_id'], unique=True)
+    op.create_index(op.f('ix_conversations_started_at'), 'conversations', ['started_at'], unique=False)
     op.create_table('embedding_sync_status',
     sa.Column('brand_id', sa.UUID(), nullable=False),
     sa.Column('entity_type', sa.Enum('PRODUCT', 'FAQ', 'ROUTINE', name='entity_type'), nullable=False),
@@ -195,7 +196,7 @@ def upgrade() -> None:
     sa.Column('entity_id', sa.UUID(), nullable=False),
     sa.Column('content', sa.Text(), nullable=True),
     sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=1024), nullable=True),
-    sa.Column('created_at', sa.String(), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
@@ -207,9 +208,9 @@ def upgrade() -> None:
     sa.Column('channel', sa.Enum('WEBSITE', 'WHATSAPP', 'INSTAGRAM', name='channel_type'), nullable=True),
     sa.Column('error_type', sa.Enum('AI_API_FAILURE', 'EMBEDDINGS_API_FAILURE', 'STORAGE_FAILURE', 'TIMEOUT', 'WEBHOOK_FAILURE', name='error_type'), nullable=False),
     sa.Column('description', sa.Text(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_error_logs_brand_id'), 'error_logs', ['brand_id'], unique=False)
@@ -236,10 +237,10 @@ def upgrade() -> None:
     sa.Column('brand_id', sa.UUID(), nullable=True),
     sa.Column('blocked_by', sa.UUID(), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['blocked_by'], ['users.id'], ),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('ip_address', 'brand_id')
     )
@@ -249,9 +250,9 @@ def upgrade() -> None:
     sa.Column('brand_id', sa.UUID(), nullable=False),
     sa.Column('sensitivity', sa.Enum('LOW', 'MEDIUM', 'HIGH', name='moderation_sensitivity'), nullable=True),
     sa.Column('response_on_block', sa.Enum('SILENT_DROP', 'POLITE_REFUSAL', 'BRAND_FALLBACK', name='moderation_response'), nullable=True),
-    sa.Column('allow_list', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('block_list', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('prompt_injection_patterns', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('allow_list', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
+    sa.Column('block_list', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
+    sa.Column('prompt_injection_patterns', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
@@ -268,9 +269,9 @@ def upgrade() -> None:
     sa.Column('message', sa.Text(), nullable=False),
     sa.Column('is_read', sa.Boolean(), nullable=True),
     sa.Column('action_url', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -283,7 +284,7 @@ def upgrade() -> None:
     sa.Column('token_hash', sa.String(length=64), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('used', sa.Boolean(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
@@ -295,7 +296,7 @@ def upgrade() -> None:
     sa.Column('brand_id', sa.UUID(), nullable=False),
     sa.Column('name', sa.String(length=255), nullable=False),
     sa.Column('description', sa.Text(), nullable=False),
-    sa.Column('ingredients', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('ingredients', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('price', sa.Numeric(precision=10, scale=2), nullable=False),
     sa.Column('image_url', sa.Text(), nullable=True),
     sa.Column('category', sa.String(length=100), nullable=True),
@@ -323,7 +324,7 @@ def upgrade() -> None:
     sa.Column('is_draft', sa.Boolean(), nullable=True),
     sa.Column('created_by', sa.UUID(), nullable=False),
     sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
@@ -353,11 +354,12 @@ def upgrade() -> None:
     sa.Column('token_hash', sa.String(length=64), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('revoked', sa.Boolean(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_refresh_tokens_expires_at'), 'refresh_tokens', ['expires_at'], unique=False)
     op.create_index(op.f('ix_refresh_tokens_id'), 'refresh_tokens', ['id'], unique=False)
     op.create_index(op.f('ix_refresh_tokens_token_hash'), 'refresh_tokens', ['token_hash'], unique=True)
     op.create_index(op.f('ix_refresh_tokens_user_id'), 'refresh_tokens', ['user_id'], unique=False)
@@ -366,7 +368,7 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=255), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('target_skin_type', sa.Enum('OILY', 'DRY', 'COMBINATION', 'SENSITIVE', 'NORMAL', name='skin_type'), nullable=True),
-    sa.Column('target_concerns', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('target_concerns', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
@@ -398,12 +400,12 @@ def upgrade() -> None:
     sa.Column('emotional_style', sa.Enum('WARM', 'CLINICAL', 'LUXURIOUS', 'FRIENDLY', name='emotional_style'), nullable=True),
     sa.Column('communication_style', sa.Enum('FORMAL', 'CASUAL', name='communication_style'), nullable=True),
     sa.Column('emoji_usage', sa.Boolean(), nullable=True),
-    sa.Column('vocabulary_preferred', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('vocabulary_avoided', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('vocabulary_preferred', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
+    sa.Column('vocabulary_avoided', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('softness_level', sa.Enum('GENTLE', 'NEUTRAL', 'DIRECT', name='softness_level'), nullable=True),
     sa.Column('sensory_language_enabled', sa.Boolean(), nullable=True),
-    sa.Column('emotional_cues', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('restricted_adjectives', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('emotional_cues', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
+    sa.Column('restricted_adjectives', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('clinical_language_allowed', sa.Boolean(), nullable=True),
     sa.Column('harsh_word_blocking', sa.Boolean(), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
@@ -419,10 +421,10 @@ def upgrade() -> None:
     sa.Column('brand_id', sa.UUID(), nullable=True),
     sa.Column('blocked_by', sa.UUID(), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['blocked_by'], ['users.id'], ),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('user_identifier', 'brand_id')
     )
@@ -431,7 +433,7 @@ def upgrade() -> None:
     op.create_table('user_brand_assignments',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('brand_id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
@@ -450,9 +452,9 @@ def upgrade() -> None:
     sa.Column('chunks_count', sa.Integer(), nullable=True),
     sa.Column('model', sa.String(length=100), nullable=True),
     sa.Column('latency_ms', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
@@ -486,7 +488,7 @@ def upgrade() -> None:
     sa.Column('conversation_id', sa.UUID(), nullable=False),
     sa.Column('role', sa.Enum('USER', 'ASSISTANT', 'AGENT', name='message_role'), nullable=False),
     sa.Column('content', sa.Text(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
@@ -501,9 +503,9 @@ def upgrade() -> None:
     sa.Column('blocked_input', sa.Text(), nullable=False),
     sa.Column('reason', sa.Enum('SPAM', 'ABUSE', 'PROMPT_INJECTION', 'OFF_TOPIC', name='moderation_reason'), nullable=False),
     sa.Column('action_taken', sa.Enum('SILENT_DROP', 'POLITE_REFUSAL', 'BRAND_FALLBACK', name='moderation_response'), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
@@ -551,10 +553,10 @@ def upgrade() -> None:
     sa.Column('conversation_id', sa.UUID(), nullable=True),
     sa.Column('session_id', sa.String(length=255), nullable=True),
     sa.Column('event_type', sa.String(length=50), nullable=False),
-    sa.Column('event_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('event_data', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
@@ -570,9 +572,9 @@ def upgrade() -> None:
     sa.Column('replacement', sa.Text(), nullable=False),
     sa.Column('reason', sa.Text(), nullable=False),
     sa.Column('rule_triggered_id', sa.UUID(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['message_id'], ['messages.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['rule_triggered_id'], ['compliance_rules.id'], ondelete='SET NULL'),
@@ -586,13 +588,13 @@ def upgrade() -> None:
     sa.Column('conversation_id', sa.UUID(), nullable=True),
     sa.Column('message_id', sa.UUID(), nullable=True),
     sa.Column('user_query', sa.Text(), nullable=False),
-    sa.Column('chunks_retrieved', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('chunks_retrieved', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('chunks_retrieved_count', sa.Integer(), nullable=True),
     sa.Column('top_similarity_score', sa.Float(), nullable=True),
     sa.Column('hit_threshold', sa.Boolean(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['message_id'], ['messages.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
@@ -607,15 +609,15 @@ def upgrade() -> None:
     sa.Column('message_id', sa.UUID(), nullable=True),
     sa.Column('user_input_summary', sa.Text(), nullable=True),
     sa.Column('skin_type', sa.Enum('OILY', 'DRY', 'COMBINATION', 'SENSITIVE', 'NORMAL', name='skin_type'), nullable=True),
-    sa.Column('concerns', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('matched_products', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('concerns', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
+    sa.Column('matched_products', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('matched_count', sa.Integer(), nullable=True),
-    sa.Column('excluded_products', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('excluded_products', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('excluded_count', sa.Integer(), nullable=True),
-    sa.Column('applied_filters', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default='now()', nullable=True),
+    sa.Column('applied_filters', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
+    sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['message_id'], ['messages.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
@@ -696,6 +698,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_refresh_tokens_user_id'), table_name='refresh_tokens')
     op.drop_index(op.f('ix_refresh_tokens_token_hash'), table_name='refresh_tokens')
     op.drop_index(op.f('ix_refresh_tokens_id'), table_name='refresh_tokens')
+    op.drop_index(op.f('ix_refresh_tokens_expires_at'), table_name='refresh_tokens')
     op.drop_table('refresh_tokens')
     op.drop_index(op.f('ix_recommendation_rules_rule_type'), table_name='recommendation_rules')
     op.drop_index(op.f('ix_recommendation_rules_id'), table_name='recommendation_rules')
@@ -741,6 +744,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_embedding_sync_status_id'), table_name='embedding_sync_status')
     op.drop_index(op.f('ix_embedding_sync_status_brand_id'), table_name='embedding_sync_status')
     op.drop_table('embedding_sync_status')
+    op.drop_index(op.f('ix_conversations_started_at'), table_name='conversations')
     op.drop_index(op.f('ix_conversations_session_id'), table_name='conversations')
     op.drop_index(op.f('ix_conversations_is_flagged'), table_name='conversations')
     op.drop_index(op.f('ix_conversations_id'), table_name='conversations')

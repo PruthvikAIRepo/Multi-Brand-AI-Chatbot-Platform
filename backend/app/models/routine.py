@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Enum, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Enum, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db.base import Base, UUIDMixin, TimestampMixin
@@ -12,7 +12,7 @@ class Routine(Base, UUIDMixin, TimestampMixin):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     target_skin_type = Column(Enum(SkinType, name="skin_type", create_constraint=False))
-    target_concerns = Column(JSONB, default=[])
+    target_concerns = Column(JSONB, server_default=text("'[]'::jsonb"))
     is_active = Column(Boolean, default=True, index=True)
     deleted_at = Column(DateTime(timezone=True))
 

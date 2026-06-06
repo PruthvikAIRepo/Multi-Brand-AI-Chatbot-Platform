@@ -9,6 +9,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Read DB URL from app config (.env) instead of hardcoded alembic.ini
+from app.config import get_settings
+settings = get_settings()
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
 # Import all models so Alembic can detect them for autogenerate
 from app.db.base import Base
 from app.models import brand  # noqa

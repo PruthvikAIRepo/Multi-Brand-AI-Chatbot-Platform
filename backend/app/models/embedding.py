@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Float, Boolean, Integer, Enum, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Text, Float, Boolean, Integer, DateTime, Enum, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from pgvector.sqlalchemy import Vector
 from app.db.base import Base, UUIDMixin, TimestampMixin
@@ -24,5 +24,5 @@ class Embedding(Base, UUIDMixin):
     entity_type = Column(Enum(EntityType, name="entity_type", create_constraint=False), nullable=False)
     entity_id = Column(UUID(as_uuid=True), nullable=False)
     content = Column(Text)
-    embedding = Column(Vector(1024))  # Adjust dimension per embedding model
-    created_at = Column(String, server_default="now()")
+    embedding = Column(Vector(1024))
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))

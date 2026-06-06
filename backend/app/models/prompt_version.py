@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Text, Boolean, Integer, DateTime, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db.base import Base, UUIDMixin
@@ -15,7 +15,7 @@ class PromptVersion(Base, UUIDMixin):
     is_draft = Column(Boolean, default=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     published_at = Column(DateTime(timezone=True))
-    created_at = Column(DateTime(timezone=True), server_default="now()")
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     __table_args__ = (UniqueConstraint("brand_id", "version_number"),)
 

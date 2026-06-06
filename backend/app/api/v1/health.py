@@ -1,27 +1,27 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter
 from sqlalchemy import text
-from app.db.session import get_db
+from app.db.session import async_session_factory
+from app.config import get_settings
 
 router = APIRouter(tags=["Health"])
 
 
 @router.get("/health")
-async def health_check(db: AsyncSession = Depends(get_db)):
+async def health_check():
     """Check API, database, and Redis connectivity."""
     checks = {"api": "ok", "database": "error", "redis": "error"}
 
-    # Check database
+    # Check database — use own session, not the dependency (health check should never fail on commit)
     try:
-        await db.execute(text("SELECT 1"))
-        checks["database"] = "ok"
+        async with async_session_factory() as session:
+            await session.execute(text("SELECT 1"))
+            checks["database"] = "ok"
     except Exception as e:
         checks["database"] = str(e)
 
     # Check Redis
     try:
         import redis.asyncio as aioredis
-        from app.config import get_settings
 
         settings = get_settings()
         r = aioredis.from_url(settings.REDIS_URL)

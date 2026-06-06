@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import get_settings
 from app.api.v1.router import api_router
 
@@ -26,16 +27,27 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Global exception handler — no stack traces in responses
+    # HTTPException handler — consistent response format for all HTTP errors
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"data": None, "message": exc.detail, "errors": [exc.detail]},
+            headers=getattr(exc, "headers", None),
+        )
+
+    # Global exception handler — no stack traces in production
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        if settings.ENVIRONMENT == "development":
-            detail = str(exc)
-        else:
-            detail = "Internal server error"
+        is_dev = settings.ENVIRONMENT == "development"
+        detail = str(exc) if is_dev else "Internal server error"
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"data": None, "message": detail, "errors": [str(exc)]},
+            content={
+                "data": None,
+                "message": detail,
+                "errors": [str(exc)] if is_dev else [],
+            },
         )
 
     # Validation error handler — consistent format

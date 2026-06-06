@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, DateTime, Enum, ForeignKey
+from sqlalchemy import Column, String, Text, Boolean, DateTime, Enum, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db.base import Base, UUIDMixin, TimestampMixin
@@ -12,7 +12,7 @@ class Conversation(Base, UUIDMixin, TimestampMixin):
     session_id = Column(String(255), nullable=False, unique=True, index=True)
     channel = Column(Enum(ChannelType, name="channel_type"), nullable=False, index=True)
     user_identifier = Column(Text)
-    session_state = Column(JSONB, default={})
+    session_state = Column(JSONB, server_default=text("'{}'::jsonb"))
     is_flagged = Column(Boolean, default=False, index=True)
     flag_reason = Column(Text)
 
@@ -24,7 +24,7 @@ class Conversation(Base, UUIDMixin, TimestampMixin):
     escalated_at = Column(DateTime(timezone=True))
     assigned_agent_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
 
-    started_at = Column(DateTime(timezone=True))
+    started_at = Column(DateTime(timezone=True), server_default=text("now()"), index=True)
     ended_at = Column(DateTime(timezone=True))
 
     brand = relationship("Brand", back_populates="conversations")
@@ -38,6 +38,6 @@ class Message(Base, UUIDMixin):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(Enum(MessageRole, name="message_role"), nullable=False)
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default="now()", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"), index=True)
 
     conversation = relationship("Conversation", back_populates="messages")

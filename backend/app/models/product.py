@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, Integer, Numeric, DateTime, Enum, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Boolean, Integer, Numeric, DateTime, Enum, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db.base import Base, UUIDMixin, TimestampMixin
@@ -11,7 +11,7 @@ class Product(Base, UUIDMixin, TimestampMixin):
     brand_id = Column(UUID(as_uuid=True), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
-    ingredients = Column(JSONB, default=[])
+    ingredients = Column(JSONB, server_default=text("'[]'::jsonb"))
     price = Column(Numeric(10, 2), nullable=False)
     image_url = Column(Text)
     category = Column(String(100), index=True)

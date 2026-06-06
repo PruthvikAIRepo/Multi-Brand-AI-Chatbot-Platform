@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Enum, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Enum, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db.base import Base, UUIDMixin, TimestampMixin
@@ -29,7 +29,7 @@ class UserBrandAssignment(Base, UUIDMixin):
 
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     brand_id = Column(UUID(as_uuid=True), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default="now()")
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     __table_args__ = (UniqueConstraint("user_id", "brand_id"),)
 
@@ -42,9 +42,9 @@ class RefreshToken(Base, UUIDMixin):
 
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True, index=True)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     revoked = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default="now()")
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     user = relationship("User", back_populates="refresh_tokens")
 
@@ -56,6 +56,6 @@ class PasswordResetToken(Base, UUIDMixin):
     token_hash = Column(String(64), nullable=False, unique=True, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default="now()")
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     user = relationship("User", back_populates="password_reset_tokens")
