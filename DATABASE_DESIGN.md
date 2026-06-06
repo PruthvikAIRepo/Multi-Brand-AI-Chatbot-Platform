@@ -358,6 +358,7 @@ CREATE TABLE products (
     purchase_url    TEXT,                    -- "Shop Now" button destination
     is_in_stock     BOOLEAN DEFAULT true,
     priority_score  INTEGER DEFAULT 0,
+    deleted_at      TIMESTAMPTZ,            -- soft delete: NULL = active, timestamp = deleted
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -365,6 +366,7 @@ CREATE TABLE products (
 CREATE INDEX idx_products_brand_id ON products(brand_id);
 CREATE INDEX idx_products_category ON products(category);
 CREATE INDEX idx_products_is_in_stock ON products(is_in_stock);
+CREATE INDEX idx_products_deleted_at ON products(deleted_at);
 ```
 
 ---
@@ -410,6 +412,7 @@ CREATE TABLE faqs (
     question    TEXT NOT NULL,
     answer      TEXT NOT NULL,
     category    VARCHAR(100),       -- text, not enum — flexible
+    deleted_at  TIMESTAMPTZ,        -- soft delete
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
@@ -431,6 +434,7 @@ CREATE TABLE routines (
     target_skin_type    skin_type,
     target_concerns     JSONB DEFAULT '[]',     -- ["acne", "dullness"]
     is_active           BOOLEAN DEFAULT true,
+    deleted_at          TIMESTAMPTZ,            -- soft delete
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
@@ -578,6 +582,9 @@ CREATE TABLE leads (
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Lead email is encrypted. We use email_hash (SHA-256) for duplicate lookup:
+-- "Does this email already exist for this brand?" without decrypting.
 
 CREATE INDEX idx_leads_brand_id ON leads(brand_id);
 CREATE INDEX idx_leads_email_hash ON leads(email_hash);
@@ -741,12 +748,12 @@ CREATE INDEX idx_el_created_at ON error_logs(created_at);
 CREATE TABLE compliance_logs (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brand_id            UUID NOT NULL REFERENCES brands(id),
-    conversation_id     UUID REFERENCES conversations(id),
-    message_id          UUID REFERENCES messages(id),
+    conversation_id     UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    message_id          UUID REFERENCES messages(id) ON DELETE SET NULL,
     original_response   TEXT NOT NULL,
     replacement         TEXT NOT NULL,
     reason              TEXT NOT NULL,
-    rule_triggered_id   UUID REFERENCES compliance_rules(id),
+    rule_triggered_id   UUID REFERENCES compliance_rules(id) ON DELETE SET NULL,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -783,8 +790,8 @@ CREATE INDEX idx_ml_created_at ON moderation_logs(created_at);
 CREATE TABLE rag_retrieval_logs (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brand_id                UUID NOT NULL REFERENCES brands(id),
-    conversation_id         UUID REFERENCES conversations(id),
-    message_id              UUID REFERENCES messages(id),
+    conversation_id         UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    message_id              UUID REFERENCES messages(id) ON DELETE SET NULL,
     user_query              TEXT NOT NULL,
     chunks_retrieved        JSONB DEFAULT '[]',     -- [{entity_type, entity_id, entity_name, score, excerpt}]
     chunks_retrieved_count  INTEGER DEFAULT 0,
@@ -806,7 +813,7 @@ CREATE INDEX idx_rrl_created_at ON rag_retrieval_logs(created_at);
 CREATE TABLE recommendation_rule_logs (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brand_id                UUID NOT NULL REFERENCES brands(id),
-    conversation_id         UUID REFERENCES conversations(id),
+    conversation_id         UUID REFERENCES conversations(id) ON DELETE SET NULL,
     user_input_summary      TEXT,
     skin_type               skin_type,
     concerns                JSONB DEFAULT '[]',
@@ -1239,3 +1246,31 @@ users (system-wide)
 | **Phase 2 Total** | | **9** |
 | | | |
 | **Grand Total** | | **44** |
+
+---
+
+## Production Safeguards
+
+| Safeguard | How It's Handled |
+|-----------|-----------------|
+| GDPR conversation deletion | Log tables use `ON DELETE SET NULL` on conversation_id/message_id FKs — logs survive (for analytics) but personal data is gone |
+| GDPR lead deletion | Direct delete from leads table. admin_activity_logs records who deleted and when |
+| Soft delete | Products, FAQs, routines have `deleted_at` field — NULL means active, timestamp means soft-deleted. All queries must filter `WHERE deleted_at IS NULL` |
+| Cascade delete brand | Deleting a brand CASCADE deletes all its content, configs, conversations, logs. This is intentional — brand deletion is total. |
+| Routine → Product dependency | `routine_steps.product_id` uses `ON DELETE RESTRICT` — can't delete a product that's used in a routine. Must remove from routine first. |
+| Encrypted fields | Leads email/phone and secrets use AES-256. Email lookup uses SHA-256 hash (email_hash). |
+| Refresh token revocation | Tokens stored server-side with `revoked` flag. Logout = revoke. Password change = revoke all user tokens. |
+
+---
+
+## Pending Client Decisions That May Add Tables
+
+These depend on client answers from Issue #2. If the client says yes, we add these tables:
+
+| Client Question | If Answer Is | Table to Add |
+|----------------|-------------|-------------|
+| Q6: Custom categories per brand? | B) Yes | `product_categories` — id, brand_id, name, display_order |
+| Q7: Custom skin quiz per brand? | B or C) Yes | `skin_quiz_questions` — id, brand_id, question_text, answer_options (JSONB), display_order |
+| Q8: Product variants? | B) Yes | `product_variants` — id, product_id, variant_name (e.g., "50ml"), variant_value, price_override, is_in_stock |
+
+We designed the current schema so these tables can be added without breaking anything — they're additive, not structural changes.
