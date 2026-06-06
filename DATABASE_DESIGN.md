@@ -769,6 +769,7 @@ CREATE INDEX idx_cl_created_at ON compliance_logs(created_at);
 CREATE TABLE moderation_logs (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brand_id            UUID NOT NULL REFERENCES brands(id),
+    conversation_id     UUID REFERENCES conversations(id) ON DELETE SET NULL,
     user_identifier     TEXT,
     blocked_input       TEXT NOT NULL,
     reason              moderation_reason NOT NULL,
@@ -814,6 +815,7 @@ CREATE TABLE recommendation_rule_logs (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brand_id                UUID NOT NULL REFERENCES brands(id),
     conversation_id         UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    message_id              UUID REFERENCES messages(id) ON DELETE SET NULL,
     user_input_summary      TEXT,
     skin_type               skin_type,
     concerns                JSONB DEFAULT '[]',
@@ -837,6 +839,7 @@ CREATE INDEX idx_rlg_created_at ON recommendation_rule_logs(created_at);
 CREATE TABLE api_usage_logs (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brand_id        UUID NOT NULL REFERENCES brands(id),
+    conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
     api_type        api_usage_type NOT NULL,
     tokens_in       INTEGER,            -- Claude calls
     tokens_out      INTEGER,            -- Claude calls
