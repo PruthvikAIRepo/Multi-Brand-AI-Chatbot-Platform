@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import health, auth, users, brands, products, faqs, routines, compliance_rules, recommendation_rules
+from app.api.v1 import health, auth, users, brands, products, faqs, routines, compliance_rules, recommendation_rules, prompts
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -29,3 +29,6 @@ api_router.include_router(compliance_rules.router)
 
 # Recommendation Rules (brand-scoped, permission-checked, with rule testing)
 api_router.include_router(recommendation_rules.router)
+
+# Prompt Management (brand-scoped, draft/publish/versioning)
+api_router.include_router(prompts.router)
