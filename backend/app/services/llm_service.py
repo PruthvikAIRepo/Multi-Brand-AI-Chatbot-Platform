@@ -1,9 +1,13 @@
-"""Provider-agnostic LLM service. Supports OpenAI and Anthropic (Claude).
-Switch via LLM_PROVIDER in .env — no code changes needed."""
+"""Provider-agnostic LLM service with timeout and retry.
+Supports OpenAI and Anthropic (Claude). Switch via LLM_PROVIDER in .env."""
 
+import asyncio
 from app.config import get_settings
 
 settings = get_settings()
+
+LLM_TIMEOUT_SECONDS = 8  # SRS: 8-second threshold
+LLM_RETRIES = 1          # SRS: 1 retry before fallback
 
 
 async def generate_response(
@@ -11,7 +15,28 @@ async def generate_response(
     messages: list[dict],
     max_tokens: int = 1000,
 ) -> dict:
-    """Generate an AI response. Returns {content, tokens_in, tokens_out, model}."""
+    """Generate an AI response with timeout and retry.
+    Returns {content, tokens_in, tokens_out, model}.
+    Raises TimeoutError or Exception on failure after retries."""
+
+    last_error = None
+
+    for attempt in range(1 + LLM_RETRIES):
+        try:
+            result = await asyncio.wait_for(
+                _call_llm(system_prompt, messages, max_tokens),
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
+            return result
+        except asyncio.TimeoutError:
+            last_error = TimeoutError(f"LLM response exceeded {LLM_TIMEOUT_SECONDS}s (attempt {attempt + 1})")
+        except Exception as e:
+            last_error = e
+
+    raise last_error
+
+
+async def _call_llm(system_prompt: str, messages: list[dict], max_tokens: int) -> dict:
     if settings.LLM_PROVIDER == "openai":
         return await _openai_generate(system_prompt, messages, max_tokens)
     elif settings.LLM_PROVIDER == "anthropic":
@@ -23,7 +48,7 @@ async def generate_response(
 async def _openai_generate(system_prompt: str, messages: list[dict], max_tokens: int) -> dict:
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, timeout=LLM_TIMEOUT_SECONDS)
 
     api_messages = [{"role": "system", "content": system_prompt}]
     for msg in messages:
@@ -47,7 +72,10 @@ async def _openai_generate(system_prompt: str, messages: list[dict], max_tokens:
 async def _anthropic_generate(system_prompt: str, messages: list[dict], max_tokens: int) -> dict:
     import anthropic
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = anthropic.AsyncAnthropic(
+        api_key=settings.ANTHROPIC_API_KEY,
+        timeout=LLM_TIMEOUT_SECONDS,
+    )
 
     api_messages = []
     for msg in messages:

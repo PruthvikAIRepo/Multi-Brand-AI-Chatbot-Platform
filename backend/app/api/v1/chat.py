@@ -40,7 +40,8 @@ async def send_message(
     result = await db.execute(select(Brand).where(Brand.slug == brand_slug, Brand.is_active == True))
     brand = result.scalar_one_or_none()
     if not brand:
-        return api_response(data=None, message="Brand not found or inactive")
+        from app.core.exceptions import NotFoundError
+        raise NotFoundError("Brand", brand_slug)
 
     # Generate session_id if not provided
     session_id = request.session_id or f"web_{uuid.uuid4().hex[:16]}"

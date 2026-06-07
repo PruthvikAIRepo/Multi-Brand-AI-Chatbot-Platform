@@ -1,19 +1,17 @@
-"""Main chat orchestrator. Ties together the full pipeline:
-User message → Moderation → RAG search → Tone assembly → LLM → Compliance → Response."""
+"""Main chat orchestrator. Full pipeline per SRS Section 3.1:
+User message → Brand check → Moderation (TODO) → RAG search → Tone assembly → LLM (timeout+retry) → Compliance → Response."""
 
-import uuid
 from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from app.models.brand import Brand
 from app.models.brand_config import BrandConfig
 from app.models.conversation import Conversation, Message
-from app.models.enums import ChannelType, MessageRole, ChatbotStatus, EntityType
-from app.models.logs import ComplianceLog, RAGRetrievalLog, APIUsageLog
+from app.models.enums import ChannelType, MessageRole, ChatbotStatus, ErrorType, ApiUsageType
+from app.models.logs import ComplianceLog, RAGRetrievalLog, APIUsageLog, ErrorLog
 from app.services import llm_service, embedding_service, tone_service, compliance_service
-from app.core.exceptions import BadRequestError
+from app.core.exceptions import NotFoundError
 
 
 async def process_message(
@@ -25,28 +23,28 @@ async def process_message(
 ) -> dict:
     """Process a user message through the full chatbot pipeline."""
 
-    # Step 1: Validate brand is active
+    # Step 1: Validate brand
     brand_result = await db.execute(select(Brand).where(Brand.id == brand_id))
     brand = brand_result.scalar_one_or_none()
     if not brand:
-        raise BadRequestError("Brand not found")
+        raise NotFoundError("Brand", str(brand_id))
 
-    if brand.chatbot_status == ChatbotStatus.DISABLED:
-        return {"response": "This chatbot is currently disabled.", "type": "disabled"}
-
-    # Load config
     config_result = await db.execute(select(BrandConfig).where(BrandConfig.brand_id == brand_id))
     config = config_result.scalar_one_or_none()
 
+    if brand.chatbot_status == ChatbotStatus.DISABLED:
+        return _empty_response("This chatbot is currently disabled.", session_id, "disabled")
+
     if brand.chatbot_status == ChatbotStatus.SAFE_MODE:
         fallback = config.fallback_message if config else "Please try again later."
-        return {"response": fallback, "type": "safe_mode"}
+        return _empty_response(fallback, session_id, "safe_mode")
 
-    # Step 2: Get or create conversation
+    # Step 2: Get or create conversation (brand_id filter prevents cross-brand contamination)
     conv_result = await db.execute(
-        select(Conversation)
-        .options(selectinload(Conversation.messages))
-        .where(Conversation.session_id == session_id)
+        select(Conversation).where(
+            Conversation.session_id == session_id,
+            Conversation.brand_id == brand_id,
+        )
     )
     conversation = conv_result.scalar_one_or_none()
 
@@ -59,30 +57,28 @@ async def process_message(
         db.add(conversation)
         await db.flush()
 
-    # Save user message
-    user_msg = Message(
-        conversation_id=conversation.id,
-        role=MessageRole.USER,
-        content=user_message,
-    )
+    # Step 3: Save user message
+    user_msg = Message(conversation_id=conversation.id, role=MessageRole.USER, content=user_message)
     db.add(user_msg)
     await db.flush()
 
-    # Step 3: RAG search — find relevant products/FAQs
+    # Step 4: RAG search
     rag_results = []
     threshold = config.rag_similarity_threshold if config else 0.7
     try:
         rag_results = await embedding_service.search_similar(
             db, brand_id, user_message, top_k=5, threshold=threshold
         )
-    except Exception:
-        pass  # RAG failure should not break chat — continue without context
+    except Exception as e:
+        db.add(ErrorLog(
+            brand_id=brand_id, channel=channel,
+            error_type=ErrorType.EMBEDDINGS_API_FAILURE,
+            description=f"RAG search failed: {str(e)[:500]}",
+        ))
 
     # Log RAG retrieval
-    rag_log = RAGRetrievalLog(
-        brand_id=brand_id,
-        conversation_id=conversation.id,
-        message_id=user_msg.id,
+    db.add(RAGRetrievalLog(
+        brand_id=brand_id, conversation_id=conversation.id, message_id=user_msg.id,
         user_query=user_message,
         chunks_retrieved=[
             {"entity_type": r["entity_type"], "entity_id": r["entity_id"],
@@ -92,94 +88,105 @@ async def process_message(
         chunks_retrieved_count=len(rag_results),
         top_similarity_score=rag_results[0]["similarity"] if rag_results else None,
         hit_threshold=len(rag_results) > 0,
-    )
-    db.add(rag_log)
+    ))
 
-    # Step 4: Assemble system prompt
+    # Step 5: Assemble system prompt + inject RAG context
     system_prompt = await tone_service.assemble_system_prompt(db, brand_id)
-
-    # Inject RAG context into prompt
     if rag_results:
-        context_text = "\n\n[Knowledge Base Context — use ONLY this information to answer]\n"
+        context = "\n\n[Knowledge Base Context — answer ONLY from this information]\n"
         for r in rag_results:
-            context_text += f"- ({r['entity_type']}): {r['content']}\n"
-        system_prompt += context_text
+            context += f"- ({r['entity_type']}): {r['content']}\n"
+        system_prompt += context
     else:
         system_prompt += "\n\n[No relevant context found. Use the fallback message.]"
 
-    # Step 5: Build conversation history for LLM
+    # Step 6: Build conversation history (last 10 messages)
     history = []
-    # Explicitly load recent messages (avoid lazy loading greenlet issue)
     msg_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation.id, Message.id != user_msg.id)
         .order_by(Message.created_at.desc())
         .limit(10)
     )
-    recent_messages = msg_result.scalars().all()
-    for msg in reversed(recent_messages):  # Reverse to chronological order
-        history.append({"role": msg.role.value, "content": msg.content})
-
+    for msg in reversed(msg_result.scalars().all()):
+        role = "assistant" if msg.role.value in ("assistant", "agent") else "user"
+        history.append({"role": role, "content": msg.content})
     history.append({"role": "user", "content": user_message})
 
-    # Step 6: Call LLM
+    # Step 7: Call LLM (8-second timeout, 1 retry)
     max_tokens = config.max_tokens if config else 1000
     start_time = datetime.now(timezone.utc)
+    llm_error = None
 
     try:
-        llm_response = await llm_service.generate_response(
-            system_prompt=system_prompt,
-            messages=history,
-            max_tokens=max_tokens,
-        )
+        llm_response = await llm_service.generate_response(system_prompt, history, max_tokens)
         ai_text = llm_response["content"]
         latency = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
-        # Log API usage
         db.add(APIUsageLog(
-            brand_id=brand_id,
-            conversation_id=conversation.id,
-            api_type="claude" if "claude" in llm_response["model"] else "claude",
-            tokens_in=llm_response["tokens_in"],
-            tokens_out=llm_response["tokens_out"],
-            model=llm_response["model"],
-            latency_ms=latency,
+            brand_id=brand_id, conversation_id=conversation.id,
+            api_type=ApiUsageType.CLAUDE,
+            tokens_in=llm_response["tokens_in"], tokens_out=llm_response["tokens_out"],
+            model=llm_response["model"], latency_ms=latency,
         ))
-
+    except TimeoutError as e:
+        llm_error = str(e)
+        db.add(ErrorLog(brand_id=brand_id, channel=channel, error_type=ErrorType.TIMEOUT, description=llm_error))
+        ai_text = config.fallback_message if config else "I couldn't process your request right now."
     except Exception as e:
-        # LLM failure — return fallback
-        fallback = config.fallback_message if config else "I'm sorry, I couldn't process your request right now."
-        ai_text = fallback
+        llm_error = str(e)[:500]
+        db.add(ErrorLog(brand_id=brand_id, channel=channel, error_type=ErrorType.AI_API_FAILURE, description=llm_error))
+        ai_text = config.fallback_message if config else "I couldn't process your request right now."
 
-    # Step 7: Compliance filter
-    compliance_result = await compliance_service.check_response(db, brand_id, ai_text)
+    # Step 8: Compliance filter
+    compliance_clean = True
+    if not llm_error:
+        compliance_result = await compliance_service.check_response(db, brand_id, ai_text)
+        if not compliance_result["is_clean"]:
+            compliance_clean = False
+            db.add(ComplianceLog(
+                brand_id=brand_id, conversation_id=conversation.id, message_id=user_msg.id,
+                original_response=compliance_result["original_response"],
+                replacement=compliance_result["response"],
+                reason=str(compliance_result["violations"]),
+            ))
+            ai_text = compliance_result["response"]
 
-    if not compliance_result["is_clean"]:
-        # Log compliance violation
-        db.add(ComplianceLog(
-            brand_id=brand_id,
-            conversation_id=conversation.id,
-            message_id=user_msg.id,
-            original_response=compliance_result["original_response"],
-            replacement=compliance_result["response"],
-            reason=str(compliance_result["violations"]),
-        ))
-        ai_text = compliance_result["response"]
-
-    # Step 8: Save AI response
-    ai_msg = Message(
-        conversation_id=conversation.id,
-        role=MessageRole.ASSISTANT,
-        content=ai_text,
-    )
-    db.add(ai_msg)
+    # Step 9: Save AI response
+    db.add(Message(conversation_id=conversation.id, role=MessageRole.ASSISTANT, content=ai_text))
     await db.flush()
+
+    # Step 10: Build product cards from RAG results
+    product_cards = []
+    for r in rag_results:
+        if r["entity_type"] == "product":
+            from app.models.product import Product
+            p_result = await db.execute(select(Product).where(Product.id == UUID(r["entity_id"])))
+            product = p_result.scalar_one_or_none()
+            if product:
+                product_cards.append({
+                    "product_id": str(product.id),
+                    "name": product.name,
+                    "price": str(product.price),
+                    "currency": brand.currency,
+                    "image_url": product.image_url,
+                    "purchase_url": product.purchase_url,
+                    "category": product.category,
+                })
 
     return {
         "response": ai_text,
         "conversation_id": str(conversation.id),
         "session_id": session_id,
-        "type": "ai",
+        "type": "fallback" if llm_error else "ai",
         "rag_hits": len(rag_results),
-        "compliance_clean": compliance_result["is_clean"],
+        "compliance_clean": compliance_clean,
+        "product_cards": product_cards,
+    }
+
+
+def _empty_response(text: str, session_id: str, resp_type: str) -> dict:
+    return {
+        "response": text, "conversation_id": None, "session_id": session_id,
+        "type": resp_type, "rag_hits": 0, "compliance_clean": True, "product_cards": [],
     }

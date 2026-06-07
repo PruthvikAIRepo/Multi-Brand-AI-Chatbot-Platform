@@ -3,7 +3,7 @@ from app.api.v1 import (
     health, auth, users, brands, products, faqs, routines,
     compliance_rules, recommendation_rules, prompts,
     conversations, logs, leads, embedding_status,
-    secrets, bot_protection, notifications, chat, embed,
+    secrets, bot_protection, notifications, chat, embed, widget,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -64,3 +64,6 @@ api_router.include_router(chat.router)
 
 # Embedding Generation (admin — trigger embedding for brand content)
 api_router.include_router(embed.router)
+
+# Widget Config (public — brand theming for chat widget)
+api_router.include_router(widget.router)
