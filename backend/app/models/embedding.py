@@ -24,5 +24,5 @@ class Embedding(Base, UUIDMixin):
     entity_type = Column(Enum(EntityType, name="entity_type", create_constraint=False), nullable=False)
     entity_id = Column(UUID(as_uuid=True), nullable=False)
     content = Column(Text)
-    embedding = Column(Vector(1024))
+    embedding = Column(Vector(1536))  # OpenAI: 1536, Voyage: 1024 — adjust per provider
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))

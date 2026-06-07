@@ -3,7 +3,7 @@ from app.api.v1 import (
     health, auth, users, brands, products, faqs, routines,
     compliance_rules, recommendation_rules, prompts,
     conversations, logs, leads, embedding_status,
-    secrets, bot_protection, notifications,
+    secrets, bot_protection, notifications, chat, embed,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -58,3 +58,9 @@ api_router.include_router(bot_protection.router)
 
 # Notifications (per user)
 api_router.include_router(notifications.router)
+
+# Chat (public — end user chatbot endpoint)
+api_router.include_router(chat.router)
+
+# Embedding Generation (admin — trigger embedding for brand content)
+api_router.include_router(embed.router)

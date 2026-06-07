@@ -30,8 +30,9 @@ httpx==0.28.1
 # AWS S3
 boto3==1.38.29
 
-# Anthropic Claude API
+# AI Providers
 anthropic==0.52.0
+openai>=1.30.0
 
 # Utilities
 python-dotenv==1.1.0

@@ -14,14 +14,21 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # Claude API
+    # LLM Provider (openai or anthropic)
+    LLM_PROVIDER: str = "openai"
+    LLM_MODEL: str = "gpt-4o-mini"
+
+    # OpenAI
+    OPENAI_API_KEY: str = ""
+
+    # Anthropic (Claude) — swap when client provides key
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
 
     # Embeddings
+    EMBEDDINGS_PROVIDER: str = "openai"  # openai or voyage
     EMBEDDINGS_API_KEY: str = ""
-    EMBEDDINGS_PROVIDER: str = "voyage"
-    EMBEDDINGS_MODEL: str = "voyage-3"
+    EMBEDDINGS_MODEL: str = "text-embedding-3-small"
 
     # S3
     AWS_ACCESS_KEY_ID: str = ""
@@ -40,7 +47,7 @@ class Settings(BaseSettings):
 
     # Server
     CORS_ORIGINS: str = "http://localhost:3000"
-    ENVIRONMENT: str = "production"  # Explicit "development" in .env for dev mode
+    ENVIRONMENT: str = "production"
 
     @property
     def cors_origins_list(self) -> list[str]:
