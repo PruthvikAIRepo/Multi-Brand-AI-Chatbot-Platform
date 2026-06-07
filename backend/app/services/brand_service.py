@@ -188,6 +188,70 @@ async def update_brand(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
     return _brand_to_dict(brand, product_count)
 
 
+async def update_brand_config(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
+    """Update brand config (response settings, messages, lead capture, etc.)."""
+    result = await db.execute(select(BrandConfig).where(BrandConfig.brand_id == brand_id))
+    config = result.scalar_one_or_none()
+    if not config:
+        raise NotFoundError("Brand config", str(brand_id))
+
+    for field, value in data.items():
+        setattr(config, field, value)
+    await db.flush()
+    return _config_to_dict(config)
+
+
+async def update_tone_settings(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
+    """Update tone settings (emotional style, vocabulary, micro-tone rules)."""
+    result = await db.execute(select(ToneSetting).where(ToneSetting.brand_id == brand_id))
+    tone = result.scalar_one_or_none()
+    if not tone:
+        raise NotFoundError("Tone settings", str(brand_id))
+
+    for field, value in data.items():
+        setattr(tone, field, value)
+    await db.flush()
+    return _tone_to_dict(tone)
+
+
+async def update_moderation_config(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
+    """Update moderation config (sensitivity, allow/block lists)."""
+    result = await db.execute(select(ModerationConfig).where(ModerationConfig.brand_id == brand_id))
+    mod = result.scalar_one_or_none()
+    if not mod:
+        raise NotFoundError("Moderation config", str(brand_id))
+
+    for field, value in data.items():
+        setattr(mod, field, value)
+    await db.flush()
+    return _moderation_to_dict(mod)
+
+
+async def update_image_styles(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
+    """Update image style rules (card styling, UI elements)."""
+    result = await db.execute(select(BrandImageStyle).where(BrandImageStyle.brand_id == brand_id))
+    style = result.scalar_one_or_none()
+    if not style:
+        raise NotFoundError("Image styles", str(brand_id))
+
+    for field, value in data.items():
+        setattr(style, field, value)
+    await db.flush()
+    return _image_style_to_dict(style)
+
+
+async def update_chatbot_status(db: AsyncSession, brand_id: UUID, status: str) -> dict:
+    """Change chatbot status: normal / safe_mode / disabled (emergency override)."""
+    result = await db.execute(select(Brand).where(Brand.id == brand_id))
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise NotFoundError("Brand", str(brand_id))
+
+    brand.chatbot_status = status
+    await db.flush()
+    return {"brand_id": str(brand_id), "chatbot_status": brand.chatbot_status.value}
+
+
 async def delete_brand(db: AsyncSession, brand_id: UUID) -> None:
     """Delete a brand and all related data (CASCADE). Irreversible."""
     result = await db.execute(select(Brand).where(Brand.id == brand_id))

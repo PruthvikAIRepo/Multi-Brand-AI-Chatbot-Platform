@@ -261,6 +261,7 @@ def _routine_to_dict(routine: Routine) -> dict:
         "target_concerns": routine.target_concerns or [],
         "is_active": routine.is_active,
         "is_deleted": routine.deleted_at is not None,
+        "step_count": len(routine.steps),
         "steps": [
             {
                 "step_number": s.step_number,

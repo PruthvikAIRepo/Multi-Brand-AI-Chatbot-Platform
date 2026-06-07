@@ -7,7 +7,7 @@ from app.services import product_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import SkinType, SkinConcern
+from app.models.enums import SkinType, SkinConcern, EmbeddingStatus
 
 router = APIRouter(prefix="/brands/{brand_id}/products", tags=["Products"])
 
@@ -35,13 +35,15 @@ async def list_products(
     concern: SkinConcern | None = None,
     in_stock: bool | None = None,
     search: str | None = None,
+    embedding_status: EmbeddingStatus | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List active products for a brand with filters. Requires products.view permission."""
     await check_brand_permission(db, current_user, brand_id, "products.view")
     products, total = await product_service.list_products(
-        db, brand_id, page, per_page, category, skin_type, concern, in_stock, search
+        db, brand_id, page, per_page, category, skin_type, concern, in_stock, search,
+        embedding_status=embedding_status,
     )
     return paginated_response(data=products, total=total, page=page, per_page=per_page)
 

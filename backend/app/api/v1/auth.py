@@ -87,6 +87,24 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "is_active": current_user.is_active,
         "must_change_password": current_user.must_change_password,
         "assigned_brands": [
-            {"brand_id": str(a.brand_id)} for a in current_user.brand_assignments
+            {"brand_id": str(a.brand_id), "permissions": a.permissions or []}
+            for a in current_user.brand_assignments
         ],
     })
+
+
+@router.put("/me", response_model=dict)
+async def update_profile(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update own profile (full_name)."""
+    if "full_name" in request:
+        current_user.full_name = request["full_name"]
+        await db.flush()
+    return api_response(data={
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+    }, message="Profile updated")

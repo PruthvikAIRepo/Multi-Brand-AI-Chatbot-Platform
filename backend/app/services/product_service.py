@@ -62,6 +62,7 @@ async def list_products(
     in_stock: bool | None = None,
     search: str | None = None,
     include_deleted: bool = False,
+    embedding_status: EmbeddingStatus | None = None,
 ) -> tuple[list[dict], int]:
     """List products for a brand with filters and pagination."""
     # Base filter
@@ -77,6 +78,17 @@ async def list_products(
     if search:
         safe_search = _escape_like(search)
         base_filter.append(Product.name.ilike(f"%{safe_search}%"))
+
+    # Embedding status filter
+    if embedding_status:
+        base_filter.append(
+            Product.id.in_(
+                select(EmbeddingSyncStatus.entity_id).where(
+                    EmbeddingSyncStatus.entity_type == EntityType.PRODUCT,
+                    EmbeddingSyncStatus.status == embedding_status,
+                )
+            )
+        )
 
     # Skin type / concern subquery filters
     extra_filters = []
