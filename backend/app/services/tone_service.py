@@ -46,7 +46,9 @@ async def assemble_system_prompt(db: AsyncSession, brand_id: UUID) -> str:
 
     if custom_prompt:
         # Custom prompt + mandatory safety rules (never bypass safety)
-        return custom_prompt.content + _build_safety_section(config, rules)
+        prompt = custom_prompt.content + _build_safety_section(config, rules)
+        await set_cached(cache_key, {"prompt": prompt})
+        return prompt
 
     # Assemble from components
     sections = []

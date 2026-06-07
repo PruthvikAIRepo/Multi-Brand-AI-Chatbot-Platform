@@ -62,18 +62,25 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
         return False
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = settings.SMTP_FROM_EMAIL
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html_body, "html"))
+        import asyncio
 
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-            if settings.SMTP_USE_TLS:
-                server.starttls()
-            if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-                server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-            server.sendmail(settings.SMTP_FROM_EMAIL, to, msg.as_string())
+        def _send_sync():
+            msg = MIMEMultipart("alternative")
+            msg["From"] = settings.SMTP_FROM_EMAIL
+            msg["To"] = to
+            msg["Subject"] = subject
+            msg.attach(MIMEText(html_body, "html"))
+
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                if settings.SMTP_USE_TLS:
+                    server.starttls()
+                if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
+                    server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+                server.sendmail(settings.SMTP_FROM_EMAIL, to, msg.as_string())
+
+        # Run blocking SMTP in a thread pool to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send_sync)
 
         return True
     except Exception:

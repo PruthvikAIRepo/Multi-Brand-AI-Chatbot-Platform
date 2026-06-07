@@ -71,6 +71,7 @@ async def update_brand(
         db, brand_id, request.model_dump(exclude_unset=True)
     )
     await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "brand", entity_id=brand_id, brand_id=brand_id, entity_name=brand.get("name"), after_state=request.model_dump(exclude_unset=True))
+    await invalidate_brand(brand_id)
     return api_response(data=brand, message="Brand updated successfully")
 
 
@@ -148,6 +149,7 @@ async def update_image_styles(
     await check_brand_permission(db, current_user, brand_id, "image_styles.edit")
     styles = await brand_service.update_image_styles(db, brand_id, request.model_dump(exclude_unset=True))
     await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "image_styles", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
+    await invalidate_brand(brand_id)
     return api_response(data=styles, message="Image styles updated")
 
 

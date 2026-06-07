@@ -30,18 +30,24 @@ def upload_file(
     """Upload a file to S3. Returns the public URL.
     Path: brands/{brand_id}/{folder}/{unique_filename}"""
 
+    if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+        raise ValueError("AWS credentials not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env")
+
     # Generate unique filename to prevent overwrites
     ext = original_filename.rsplit(".", 1)[-1] if "." in original_filename else "jpg"
     unique_name = f"{uuid.uuid4().hex[:12]}.{ext}"
     key = f"brands/{brand_id}/{folder}/{unique_name}"
 
-    client = _get_client()
-    client.put_object(
-        Bucket=settings.AWS_S3_BUCKET,
-        Key=key,
-        Body=file_content,
-        ContentType=content_type,
-    )
+    try:
+        client = _get_client()
+        client.put_object(
+            Bucket=settings.AWS_S3_BUCKET,
+            Key=key,
+            Body=file_content,
+            ContentType=content_type,
+        )
+    except ClientError as e:
+        raise ValueError(f"S3 upload failed: {e}")
 
     return f"https://{settings.AWS_S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{key}"
 
