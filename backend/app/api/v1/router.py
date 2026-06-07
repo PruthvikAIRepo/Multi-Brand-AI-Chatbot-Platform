@@ -3,6 +3,7 @@ from app.api.v1 import (
     health, auth, users, brands, products, faqs, routines,
     compliance_rules, recommendation_rules, prompts,
     conversations, logs, leads, embedding_status,
+    secrets, bot_protection, notifications,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -48,3 +49,12 @@ api_router.include_router(leads.router)
 
 # Embedding Status (brand-scoped)
 api_router.include_router(embedding_status.router)
+
+# Secrets (Super Admin only, encrypted)
+api_router.include_router(secrets.router)
+
+# Bot Protection (Super Admin only)
+api_router.include_router(bot_protection.router)
+
+# Notifications (per user)
+api_router.include_router(notifications.router)
