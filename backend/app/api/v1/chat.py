@@ -60,13 +60,14 @@ async def send_message(
     if rate_check:
         raise RateLimitError()
 
-    # Process through pipeline
+    # Process through pipeline (pass IP for moderation block list checks)
     response = await chat_service.process_message(
         db=db,
         brand_id=brand.id,
         session_id=session_id,
         user_message=request.message,
         channel=request.channel,
+        ip_address=client_ip,
     )
 
     return api_response(data=response)

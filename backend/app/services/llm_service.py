@@ -6,8 +6,8 @@ from app.config import get_settings
 
 settings = get_settings()
 
-LLM_TIMEOUT_SECONDS = 8  # SRS: 8-second threshold
-LLM_RETRIES = 1          # SRS: 1 retry before fallback
+LLM_TIMEOUT_SECONDS = settings.LLM_TIMEOUT_SECONDS
+LLM_RETRIES = settings.LLM_RETRIES
 
 
 async def generate_response(
@@ -58,7 +58,7 @@ async def _openai_generate(system_prompt: str, messages: list[dict], max_tokens:
         model=settings.LLM_MODEL,
         messages=api_messages,
         max_tokens=max_tokens,
-        temperature=0.7,
+        temperature=settings.LLM_TEMPERATURE,
     )
 
     return {

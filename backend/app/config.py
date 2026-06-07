@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # LLM Provider (openai or anthropic)
     LLM_PROVIDER: str = "openai"
     LLM_MODEL: str = "gpt-4o-mini"
+    LLM_TIMEOUT_SECONDS: int = 8
+    LLM_RETRIES: int = 1
+    LLM_TEMPERATURE: float = 0.7
 
     # OpenAI
     OPENAI_API_KEY: str = ""

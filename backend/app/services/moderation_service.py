@@ -98,18 +98,24 @@ async def moderate_input(
                             user_message, ModerationReason.SPAM, response_on_block,
                             "Empty message")
 
-    # Step 5: Gibberish detection
+    # Step 5: Check allow_list — whitelisted phrases bypass pattern checks
+    allow_list = config.allow_list if config else []
+    message_lower = user_message.lower()
+    is_whitelisted = any(allowed.lower() in message_lower for allowed in allow_list) if allow_list else False
+
+    # Step 6: Gibberish detection
     if _is_gibberish(stripped):
         return await _block(db, brand_id, conversation_id, user_identifier,
                             user_message, ModerationReason.SPAM, response_on_block,
                             "Gibberish detected")
 
-    # Step 6: Prompt injection detection
-    for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_message, re.IGNORECASE):
-            return await _block(db, brand_id, conversation_id, user_identifier,
-                                user_message, ModerationReason.PROMPT_INJECTION, response_on_block,
-                                f"Prompt injection pattern: {pattern}")
+    # Step 7: Prompt injection detection (skipped if whitelisted)
+    if not is_whitelisted:
+        for pattern in INJECTION_PATTERNS:
+            if re.search(pattern, user_message, re.IGNORECASE):
+                return await _block(db, brand_id, conversation_id, user_identifier,
+                                    user_message, ModerationReason.PROMPT_INJECTION, response_on_block,
+                                    f"Prompt injection pattern detected")
 
     # Step 7: Check admin-defined block list
     if config and config.block_list:
@@ -130,13 +136,13 @@ async def moderate_input(
             except re.error:
                 pass  # Invalid regex in admin config — skip
 
-    # Step 9: Abuse/profanity filter (sensitivity-based)
-    if sensitivity in (ModerationSensitivity.MEDIUM, ModerationSensitivity.HIGH):
+    # Step 10: Abuse/profanity filter (sensitivity-based, skipped if whitelisted)
+    if not is_whitelisted and sensitivity in (ModerationSensitivity.MEDIUM, ModerationSensitivity.HIGH):
         for pattern in ABUSE_PATTERNS:
             if re.search(pattern, user_message, re.IGNORECASE):
                 return await _block(db, brand_id, conversation_id, user_identifier,
                                     user_message, ModerationReason.ABUSE, response_on_block,
-                                    f"Abusive content detected")
+                                    "Abusive content detected")
 
     # All checks passed
     return {"is_allowed": True}

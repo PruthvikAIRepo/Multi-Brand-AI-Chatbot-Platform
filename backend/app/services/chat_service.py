@@ -20,6 +20,8 @@ async def process_message(
     session_id: str,
     user_message: str,
     channel: ChannelType = ChannelType.WEBSITE,
+    ip_address: str | None = None,
+    user_identifier: str | None = None,
 ) -> dict:
     """Process a user message through the full chatbot pipeline."""
 
@@ -42,18 +44,18 @@ async def process_message(
     # Step 2: Input moderation — block spam/abuse/injection BEFORE any LLM call (saves tokens)
     moderation_result = await moderation_service.moderate_input(
         db, brand_id, user_message,
-        user_identifier=None,  # Set from request context if available
-        ip_address=None,       # Set from request context if available
+        user_identifier=user_identifier or session_id,
+        ip_address=ip_address,
     )
     if not moderation_result["is_allowed"]:
         from app.models.enums import ModerationResponse
         action = moderation_result.get("action", "brand_fallback")
+        fallback = config.fallback_message if config else "I can only help with skincare-related questions."
         if action == "silent_drop":
             return _empty_response("", session_id, "moderated")
         elif action == "polite_refusal":
-            return _empty_response("I can only help with skincare-related questions.", session_id, "moderated")
+            return _empty_response("I can only help with skincare-related questions. How can I assist you with your skincare needs?", session_id, "moderated")
         else:
-            fallback = config.fallback_message if config else "I can only help with skincare-related questions."
             return _empty_response(fallback, session_id, "moderated")
 
     # Step 3: Get or create conversation (brand_id filter prevents cross-brand contamination)
