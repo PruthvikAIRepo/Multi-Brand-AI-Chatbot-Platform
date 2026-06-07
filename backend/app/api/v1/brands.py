@@ -10,6 +10,7 @@ from app.schemas.brand_config import (
 from app.services import brand_service, audit_service
 from app.core.permissions import get_current_user, require_super_admin, check_brand_permission
 from app.core.response import api_response, paginated_response
+from app.core.cache import invalidate_brand
 from app.models.user import User
 from app.models.enums import AdminActionType
 
@@ -102,6 +103,7 @@ async def update_brand_config(
     await check_brand_permission(db, current_user, brand_id, "brand.config.edit")
     config = await brand_service.update_brand_config(db, brand_id, request.model_dump(exclude_unset=True))
     await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "brand_config", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
+    await invalidate_brand(brand_id)
     return api_response(data=config, message="Brand config updated")
 
 
@@ -116,6 +118,7 @@ async def update_tone_settings(
     await check_brand_permission(db, current_user, brand_id, "tone.edit")
     tone = await brand_service.update_tone_settings(db, brand_id, request.model_dump(exclude_unset=True))
     await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "tone_settings", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
+    await invalidate_brand(brand_id)
     return api_response(data=tone, message="Tone settings updated")
 
 
@@ -130,6 +133,7 @@ async def update_moderation_config(
     await check_brand_permission(db, current_user, brand_id, "moderation.edit")
     mod = await brand_service.update_moderation_config(db, brand_id, request.model_dump(exclude_unset=True))
     await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "moderation_config", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
+    await invalidate_brand(brand_id)
     return api_response(data=mod, message="Moderation config updated")
 
 
@@ -158,4 +162,5 @@ async def update_chatbot_status(
     await check_brand_permission(db, current_user, brand_id, "emergency.override")
     result = await brand_service.update_chatbot_status(db, brand_id, request.status)
     await audit_service.log_action(db, current_user.id, AdminActionType.OVERRIDDEN, "chatbot_status", brand_id=brand_id, after_state={"status": request.status.value})
+    await invalidate_brand(brand_id)
     return api_response(data=result, message=f"Chatbot status changed to {request.status.value}")

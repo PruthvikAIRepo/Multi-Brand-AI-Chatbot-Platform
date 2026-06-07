@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # Rate limiting
     RATE_LIMIT_PER_IP: int = 60
 
+    # Email (SMTP)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "noreply@chatbot.com"
+    SMTP_USE_TLS: bool = True
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # Server
     CORS_ORIGINS: str = "http://localhost:3000"
     ENVIRONMENT: str = "production"

@@ -75,6 +75,10 @@ async def invite_user(
 
     await db.flush()
 
+    # Send invitation email
+    from app.services.email_service import send_invitation_email
+    await send_invitation_email(email, full_name, temp_password)
+
     return {
         "id": str(user.id),
         "email": user.email,

@@ -157,6 +157,10 @@ async def forgot_password(db: AsyncSession, email: str) -> str | None:
     # Generate new reset token
     raw_token, token_hash = generate_reset_token()
 
+    # Send reset email
+    from app.services.email_service import send_password_reset_email
+    await send_password_reset_email(email, raw_token)
+
     reset_token = PasswordResetToken(
         user_id=user.id,
         token_hash=token_hash,
