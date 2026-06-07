@@ -9,6 +9,7 @@ from app.models.brand import Brand
 from app.models.brand_config import BrandConfig
 from app.models.conversation import Conversation, Message
 from app.models.product import Product
+from app.models.tone_setting import ToneSetting
 from app.models.enums import (
     ChannelType, MessageRole, ChatbotStatus, ErrorType, ApiUsageType,
     SkinType, SkinConcern,
@@ -17,6 +18,7 @@ from app.models.logs import ComplianceLog, RAGRetrievalLog, APIUsageLog, ErrorLo
 from app.services import (
     llm_service, embedding_service, tone_service,
     compliance_service, moderation_service, recommendation_rule_service,
+    channel_formatter,
 )
 from app.core.exceptions import NotFoundError
 
@@ -247,14 +249,26 @@ async def process_message(
                     "category": product.category,
                 })
 
+    # Step 16: Format response for channel (SRS Section 14)
+    # Load emoji preference from tone settings
+    tone_result = await db.execute(
+        select(ToneSetting).where(ToneSetting.brand_id == brand_id)
+    )
+    tone = tone_result.scalar_one_or_none()
+    emoji_allowed = tone.emoji_usage if tone else False
+
+    formatted = channel_formatter.format_response(ai_text, product_cards, channel, emoji_allowed)
+
     return {
-        "response": ai_text,
+        "response": formatted["text"],
+        "response_format": formatted["format"],
         "conversation_id": str(conversation.id),
         "session_id": session_id,
         "type": "fallback" if llm_error else "ai",
         "rag_hits": len(rag_results),
         "compliance_clean": compliance_clean,
-        "product_cards": product_cards,
+        "product_cards": formatted["product_cards"],
+        "quick_replies": formatted["quick_replies"],
         "session_state": {
             "skin_type": skin_type,
             "concerns": concerns,
@@ -320,8 +334,9 @@ def _update_profile_from_message(
 
 def _empty_response(text: str, session_id: str, resp_type: str) -> dict:
     return {
-        "response": text, "conversation_id": None, "session_id": session_id,
+        "response": text, "response_format": "plain",
+        "conversation_id": None, "session_id": session_id,
         "type": resp_type, "rag_hits": 0, "compliance_clean": True,
-        "product_cards": [],
+        "product_cards": [], "quick_replies": [],
         "session_state": {"skin_type": None, "concerns": [], "preferences": [], "products_recommended_count": 0},
     }
