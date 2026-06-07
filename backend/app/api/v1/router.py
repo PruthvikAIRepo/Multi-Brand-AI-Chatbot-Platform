@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import health, auth, users, brands, products, faqs, routines, compliance_rules, recommendation_rules, prompts
+from app.api.v1 import health, auth, users, brands, products, faqs, routines, compliance_rules, recommendation_rules, prompts, conversations, logs
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -32,3 +32,9 @@ api_router.include_router(recommendation_rules.router)
 
 # Prompt Management (brand-scoped, draft/publish/versioning)
 api_router.include_router(prompts.router)
+
+# Conversations (brand-scoped, view/flag/delete)
+api_router.include_router(conversations.router)
+
+# Logs (system-wide + brand-scoped)
+api_router.include_router(logs.router)
