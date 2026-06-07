@@ -105,8 +105,8 @@ async def process_message(
     ))
 
     # Step 8: Apply recommendation rules if we have a skin profile (SRS Section 24)
-    filtered_products = []
-    rule_log_data = None
+    filtered_products = list(rag_results)  # Default: use all RAG results
+
     if skin_type and any(r["entity_type"] == "product" for r in rag_results):
         try:
             skin_enum = SkinType(skin_type) if skin_type else None
@@ -115,18 +115,16 @@ async def process_message(
                 rule_result = await recommendation_rule_service.test_rules(
                     db, brand_id, skin_enum, concern_enums, preferences
                 )
-                matched_ids = {p["product_id"] for p in rule_result.get("matched_products", [])}
-                excluded_ids = {p["product_id"] for p in rule_result.get("excluded_products", [])}
 
-                # Filter RAG results through recommendation rules
-                for r in rag_results:
-                    if r["entity_type"] == "product":
-                        if r["entity_id"] in matched_ids and r["entity_id"] not in excluded_ids:
-                            filtered_products.append(r)
-                    else:
-                        filtered_products.append(r)  # Keep FAQs/routines
+                # Only filter if rules engine returned real results (not a fallback)
+                if not rule_result.get("fallback"):
+                    excluded_ids = {p["product_id"] for p in rule_result.get("excluded_products", [])}
 
-                rule_log_data = rule_result
+                    filtered_products = []
+                    for r in rag_results:
+                        if r["entity_type"] == "product" and r["entity_id"] in excluded_ids:
+                            continue  # Excluded by rules
+                        filtered_products.append(r)
 
                 # Log recommendation rule execution
                 db.add(RecommendationRuleLog(
@@ -141,9 +139,7 @@ async def process_message(
                     applied_filters={"rules_applied": rule_result.get("rules_applied", 0)},
                 ))
         except Exception:
-            filtered_products = rag_results  # Rules failed — fall back to unfiltered RAG
-    else:
-        filtered_products = rag_results
+            pass  # Rules failed — keep unfiltered RAG results
 
     # Filter out already-recommended products (SRS Section 15.2 — no repeats)
     context_results = [
@@ -225,7 +221,10 @@ async def process_message(
     db.add(Message(conversation_id=conversation.id, role=MessageRole.ASSISTANT, content=ai_text))
 
     # Step 14: Update session state (persist skin profile + recommended products)
-    new_recommended = [r["entity_id"] for r in context_results if r["entity_type"] == "product"]
+    # Only mark products as recommended if LLM actually presented them (not on fallback)
+    new_recommended = []
+    if not llm_error:
+        new_recommended = [r["entity_id"] for r in context_results if r["entity_type"] == "product"]
     conversation.session_state = {
         "skin_type": skin_type,
         "concerns": concerns,
@@ -268,45 +267,52 @@ async def process_message(
 def _update_profile_from_message(
     message: str, skin_type: str | None, concerns: list, preferences: list
 ) -> tuple[str | None, list, list]:
-    """Extract skin profile info from user message using keyword detection.
+    """Extract skin profile info using word-boundary matching (not substring).
     SRS Section 15.1: Once user provides skin type, store in session."""
+    import re
     msg_lower = message.lower()
 
-    # Detect skin type
-    skin_keywords = {
-        "oily": "oily", "oil": "oily",
-        "dry": "dry", "flaky": "dry",
-        "combination": "combination", "combo": "combination",
-        "sensitive": "sensitive",
-        "normal": "normal",
-    }
-    for keyword, stype in skin_keywords.items():
-        if keyword in msg_lower and not skin_type:
-            skin_type = stype
-            break
+    def _match(keyword: str) -> bool:
+        """Match keyword with word boundaries to avoid false positives."""
+        return bool(re.search(r'\b' + re.escape(keyword) + r'\b', msg_lower))
+
+    # Detect skin type (only set once — first detection sticks)
+    if not skin_type:
+        skin_patterns = [
+            ("oily skin", "oily"), ("oily", "oily"),
+            ("dry skin", "dry"), ("flaky", "dry"),
+            ("combination skin", "combination"), ("combo skin", "combination"), ("combination", "combination"),
+            ("sensitive skin", "sensitive"),
+            ("normal skin", "normal"),
+        ]
+        for phrase, stype in skin_patterns:
+            if _match(phrase):
+                skin_type = stype
+                break
 
     # Detect concerns
-    concern_keywords = {
-        "acne": "acne", "pimple": "acne", "breakout": "acne",
-        "aging": "aging", "wrinkle": "aging", "fine line": "aging", "anti-aging": "aging",
-        "hydration": "hydration", "moistur": "hydration", "dehydrat": "hydration",
-        "dark spot": "hyperpigmentation", "hyperpigmentation": "hyperpigmentation", "pigment": "hyperpigmentation", "uneven tone": "hyperpigmentation",
-        "sensitive": "sensitivity", "irritat": "sensitivity", "redness": "sensitivity",
-        "dull": "dullness", "glow": "dullness", "radian": "dullness", "bright": "dullness",
-    }
-    for keyword, concern in concern_keywords.items():
-        if keyword in msg_lower and concern not in concerns:
+    concern_patterns = [
+        ("acne", "acne"), ("pimple", "acne"), ("breakout", "acne"), ("blemish", "acne"),
+        ("aging", "aging"), ("wrinkle", "aging"), ("fine line", "aging"), ("anti-aging", "aging"),
+        ("hydration", "hydration"), ("dehydrated", "hydration"), ("dry skin", "hydration"),
+        ("dark spot", "hyperpigmentation"), ("hyperpigmentation", "hyperpigmentation"),
+        ("pigmentation", "hyperpigmentation"), ("uneven tone", "hyperpigmentation"), ("uneven skin", "hyperpigmentation"),
+        ("irritation", "sensitivity"), ("redness", "sensitivity"), ("reactive skin", "sensitivity"),
+        ("dull skin", "dullness"), ("dullness", "dullness"), ("lack of glow", "dullness"), ("radiance", "dullness"),
+    ]
+    for phrase, concern in concern_patterns:
+        if _match(phrase) and concern not in concerns:
             concerns.append(concern)
 
     # Detect preferences
-    pref_keywords = {
-        "fragrance-free": "fragrance-free", "no fragrance": "fragrance-free", "unscented": "fragrance-free",
-        "vegan": "vegan", "cruelty-free": "cruelty-free",
-        "budget": "budget-friendly", "affordable": "budget-friendly", "cheap": "budget-friendly",
-        "natural": "natural", "organic": "organic",
-    }
-    for keyword, pref in pref_keywords.items():
-        if keyword in msg_lower and pref not in preferences:
+    pref_patterns = [
+        ("fragrance-free", "fragrance-free"), ("no fragrance", "fragrance-free"), ("unscented", "fragrance-free"),
+        ("vegan", "vegan"), ("cruelty-free", "cruelty-free"), ("cruelty free", "cruelty-free"),
+        ("budget", "budget-friendly"), ("affordable", "budget-friendly"),
+        ("natural", "natural"), ("organic", "organic"),
+    ]
+    for phrase, pref in pref_patterns:
+        if _match(phrase) and pref not in preferences:
             preferences.append(pref)
 
     return skin_type, concerns, preferences
@@ -316,5 +322,6 @@ def _empty_response(text: str, session_id: str, resp_type: str) -> dict:
     return {
         "response": text, "conversation_id": None, "session_id": session_id,
         "type": resp_type, "rag_hits": 0, "compliance_clean": True,
-        "product_cards": [], "session_state": None,
+        "product_cards": [],
+        "session_state": {"skin_type": None, "concerns": [], "preferences": [], "products_recommended_count": 0},
     }
