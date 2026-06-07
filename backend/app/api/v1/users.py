@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest, UpdateUserPermissionsRequest
-from app.services import user_service
+from app.services import user_service, audit_service
 from app.core.permissions import require_super_admin
+from app.models.enums import AdminActionType
 from app.core.response import api_response, paginated_response
 from app.models.user import User
 
@@ -20,6 +21,10 @@ async def invite_user(
     """Invite a new admin user. Super Admin only."""
     result = await user_service.invite_user(
         db, request.email, request.full_name, request.role, request.brand_ids
+    )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.INVITED, "user",
+        entity_name=result["email"], after_state={"role": result["role"], "brands": result["assigned_brand_ids"]},
     )
     return api_response(data=result, message="User invited successfully")
 
@@ -90,6 +95,7 @@ async def deactivate_user(
 ):
     """Deactivate a user and revoke all their tokens. Super Admin only."""
     result = await user_service.deactivate_user(db, user_id, current_user.id)
+    await audit_service.log_action(db, current_user.id, AdminActionType.DISABLED, "user", entity_id=user_id)
     return api_response(data=result, message="User deactivated")
 
 

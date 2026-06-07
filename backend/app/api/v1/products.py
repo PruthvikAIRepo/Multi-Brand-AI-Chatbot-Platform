@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.product import ProductCreateRequest, ProductUpdateRequest
-from app.services import product_service
+from app.services import product_service, audit_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import SkinType, SkinConcern, EmbeddingStatus
+from app.models.enums import SkinType, SkinConcern, EmbeddingStatus, AdminActionType
 
 router = APIRouter(prefix="/brands/{brand_id}/products", tags=["Products"])
 
@@ -22,6 +22,10 @@ async def create_product(
     """Create a product for a brand. Requires products.edit permission."""
     await check_brand_permission(db, current_user, brand_id, "products.edit")
     product = await product_service.create_product(db, brand_id, request.model_dump())
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "product",
+        entity_name=product["name"], brand_id=brand_id, after_state=product,
+    )
     return api_response(data=product, message="Product created successfully")
 
 
@@ -103,6 +107,10 @@ async def delete_product(
     """Soft delete a product. Removes from RAG search immediately. Requires products.edit permission."""
     await check_brand_permission(db, current_user, brand_id, "products.edit")
     await product_service.delete_product(db, brand_id, product_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "product",
+        entity_id=product_id, brand_id=brand_id,
+    )
     return api_response(message="Product deleted successfully")
 
 

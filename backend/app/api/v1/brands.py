@@ -7,10 +7,11 @@ from app.schemas.brand_config import (
     BrandConfigUpdateRequest, ToneSettingsUpdateRequest,
     ModerationConfigUpdateRequest, ImageStyleUpdateRequest, ChatbotStatusRequest,
 )
-from app.services import brand_service
+from app.services import brand_service, audit_service
 from app.core.permissions import get_current_user, require_super_admin, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
+from app.models.enums import AdminActionType
 
 router = APIRouter(prefix="/brands", tags=["Brands"])
 
@@ -23,6 +24,10 @@ async def create_brand(
 ):
     """Create a new brand with default configs. Super Admin only."""
     brand = await brand_service.create_brand(db, request.model_dump())
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "brand",
+        entity_name=brand["name"], after_state=brand,
+    )
     return api_response(data=brand, message="Brand created successfully")
 
 
@@ -72,6 +77,10 @@ async def delete_brand(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a brand and ALL related data. Super Admin only. Irreversible."""
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "brand",
+        entity_id=brand_id, brand_id=brand_id,
+    )
     await brand_service.delete_brand(db, brand_id)
     return api_response(message="Brand deleted successfully")
 
