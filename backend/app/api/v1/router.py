@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import health, auth
+from app.api.v1 import health, auth, users
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -9,7 +9,9 @@ api_router.include_router(health.router)
 # Auth (public — login, refresh, forgot/reset password)
 api_router.include_router(auth.router)
 
-# Future routers will be added here as we build each module:
-# api_router.include_router(users.router)
+# User management (Super Admin only)
+api_router.include_router(users.router)
+
+# Future routers:
 # api_router.include_router(brands.router)
 # etc.

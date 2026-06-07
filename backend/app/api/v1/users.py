@@ -1,0 +1,79 @@
+from uuid import UUID
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session import get_db
+from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest
+from app.services import user_service
+from app.core.permissions import require_super_admin
+from app.core.response import api_response
+from app.models.user import User
+
+router = APIRouter(prefix="/users", tags=["User Management"])
+
+
+@router.post("", response_model=dict)
+async def invite_user(
+    request: InviteUserRequest,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Invite a new admin user. Super Admin only."""
+    result = await user_service.invite_user(
+        db, request.email, request.full_name, request.role, request.brand_ids
+    )
+    return api_response(data=result, message="User invited successfully")
+
+
+@router.get("", response_model=dict)
+async def list_users(
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all admin users. Super Admin only."""
+    users = await user_service.list_users(db)
+    return api_response(data=users)
+
+
+@router.get("/{user_id}", response_model=dict)
+async def get_user(
+    user_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single user's details. Super Admin only."""
+    user = await user_service.get_user(db, user_id)
+    return api_response(data=user)
+
+
+@router.put("/{user_id}/brands", response_model=dict)
+async def update_user_brands(
+    user_id: UUID,
+    request: UpdateUserBrandsRequest,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update brand assignments for a user. Super Admin only."""
+    user = await user_service.update_user_brands(db, user_id, request.brand_ids)
+    return api_response(data=user, message="Brand assignments updated")
+
+
+@router.post("/{user_id}/deactivate", response_model=dict)
+async def deactivate_user(
+    user_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deactivate a user (revoke access). Super Admin only."""
+    result = await user_service.deactivate_user(db, user_id, current_user.id)
+    return api_response(data=result, message="User deactivated")
+
+
+@router.post("/{user_id}/activate", response_model=dict)
+async def activate_user(
+    user_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reactivate a deactivated user. Super Admin only."""
+    result = await user_service.activate_user(db, user_id)
+    return api_response(data=result, message="User activated")
