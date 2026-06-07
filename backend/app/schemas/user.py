@@ -22,7 +22,6 @@ class InviteUserRequest(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     role: UserRole = UserRole.ADMIN
     brand_ids: list[UUID] = []
-    permissions: list[str] | None = None  # None = all permissions (default)
 
 
 class UpdateUserBrandsRequest(BaseModel):
