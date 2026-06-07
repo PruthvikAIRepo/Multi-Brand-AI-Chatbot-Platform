@@ -1,5 +1,5 @@
 """Main chat orchestrator. Full pipeline per SRS Section 3.1:
-User message → Brand check → Moderation (TODO) → RAG search → Tone assembly → LLM (timeout+retry) → Compliance → Response."""
+User message → Brand check → Moderation → RAG search → Tone assembly → LLM (timeout+retry) → Compliance → Response."""
 
 from datetime import datetime, timezone
 from uuid import UUID
@@ -10,7 +10,7 @@ from app.models.brand_config import BrandConfig
 from app.models.conversation import Conversation, Message
 from app.models.enums import ChannelType, MessageRole, ChatbotStatus, ErrorType, ApiUsageType
 from app.models.logs import ComplianceLog, RAGRetrievalLog, APIUsageLog, ErrorLog
-from app.services import llm_service, embedding_service, tone_service, compliance_service
+from app.services import llm_service, embedding_service, tone_service, compliance_service, moderation_service
 from app.core.exceptions import NotFoundError
 
 
@@ -39,7 +39,24 @@ async def process_message(
         fallback = config.fallback_message if config else "Please try again later."
         return _empty_response(fallback, session_id, "safe_mode")
 
-    # Step 2: Get or create conversation (brand_id filter prevents cross-brand contamination)
+    # Step 2: Input moderation — block spam/abuse/injection BEFORE any LLM call (saves tokens)
+    moderation_result = await moderation_service.moderate_input(
+        db, brand_id, user_message,
+        user_identifier=None,  # Set from request context if available
+        ip_address=None,       # Set from request context if available
+    )
+    if not moderation_result["is_allowed"]:
+        from app.models.enums import ModerationResponse
+        action = moderation_result.get("action", "brand_fallback")
+        if action == "silent_drop":
+            return _empty_response("", session_id, "moderated")
+        elif action == "polite_refusal":
+            return _empty_response("I can only help with skincare-related questions.", session_id, "moderated")
+        else:
+            fallback = config.fallback_message if config else "I can only help with skincare-related questions."
+            return _empty_response(fallback, session_id, "moderated")
+
+    # Step 3: Get or create conversation (brand_id filter prevents cross-brand contamination)
     conv_result = await db.execute(
         select(Conversation).where(
             Conversation.session_id == session_id,
