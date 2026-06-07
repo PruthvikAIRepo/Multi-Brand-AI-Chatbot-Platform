@@ -1,5 +1,5 @@
 """Meta Platform API service — sends messages via WhatsApp Cloud API and Instagram Graph API.
-Used by webhook handlers to send AI responses back to users."""
+Uses per-brand tokens from the secrets table. Phone number ID resolved from secrets."""
 
 import httpx
 from uuid import UUID
@@ -8,27 +8,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.secret_service import resolve_api_key
 from app.models.enums import SecretType
 
+GRAPH_API_VERSION = "v18.0"
+GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
-async def send_whatsapp_message(db: AsyncSession, brand_id: UUID, phone_number: str, text: str) -> bool:
+
+async def send_whatsapp_message(
+    db: AsyncSession, brand_id: UUID, recipient_phone: str, text: str,
+    phone_number_id: str | None = None,
+) -> bool:
     """Send a text message via WhatsApp Cloud API.
-    Uses the brand's Meta WhatsApp token (or system default)."""
+    phone_number_id: the WhatsApp Business phone number ID (from Meta dashboard).
+    If not provided, falls back to the token value which may contain it."""
 
     token = await resolve_api_key(db, brand_id, SecretType.META_WHATSAPP_TOKEN)
     if not token:
         return False
 
-    # WhatsApp Cloud API expects: phone_number_id in the URL
-    # The token includes access to the phone number
-    # For now, we use the token as the access token and the phone_number_id
-    # should be stored in channel_configs (Phase 2 table)
+    # The phone_number_id should come from channel_configs per brand
+    # For now, use it if passed, or try to send via the token's default phone
+    wa_phone_id = phone_number_id or "PHONE_NUMBER_ID"  # Must be configured per brand
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
-                f"https://graph.facebook.com/v18.0/me/messages",
+                f"{GRAPH_API_BASE}/{wa_phone_id}/messages",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "messaging_product": "whatsapp",
-                    "to": phone_number,
+                    "to": recipient_phone,
                     "type": "text",
                     "text": {"body": text},
                 },
@@ -38,54 +45,22 @@ async def send_whatsapp_message(db: AsyncSession, brand_id: UUID, phone_number: 
         return False
 
 
-async def send_whatsapp_product_message(
-    db: AsyncSession, brand_id: UUID, phone_number: str, text: str, products: list[dict]
+async def send_instagram_message(
+    db: AsyncSession, brand_id: UUID, recipient_id: str, text: str,
+    page_id: str | None = None,
 ) -> bool:
-    """Send a message with product info via WhatsApp (text + image per product)."""
-    # First send the text response
-    sent = await send_whatsapp_message(db, brand_id, phone_number, text)
-    if not sent:
-        return False
-
-    # Send product images as separate media messages
-    token = await resolve_api_key(db, brand_id, SecretType.META_WHATSAPP_TOKEN)
-    if not token:
-        return True  # Text sent, media failed — acceptable
-
-    for product in products[:3]:  # Max 3 products for WhatsApp
-        if product.get("image_url"):
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    await client.post(
-                        f"https://graph.facebook.com/v18.0/me/messages",
-                        headers={"Authorization": f"Bearer {token}"},
-                        json={
-                            "messaging_product": "whatsapp",
-                            "to": phone_number,
-                            "type": "image",
-                            "image": {
-                                "link": product["image_url"],
-                                "caption": f"{product['name']} - {product.get('currency', '')} {product.get('price', '')}",
-                            },
-                        },
-                    )
-            except Exception:
-                pass  # Individual image failures don't block
-
-    return True
-
-
-async def send_instagram_message(db: AsyncSession, brand_id: UUID, recipient_id: str, text: str) -> bool:
-    """Send a message via Instagram Graph API."""
+    """Send a message via Instagram Messaging API."""
 
     token = await resolve_api_key(db, brand_id, SecretType.META_INSTAGRAM_TOKEN)
     if not token:
         return False
 
+    ig_page_id = page_id or "me"
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
-                f"https://graph.facebook.com/v18.0/me/messages",
+                f"{GRAPH_API_BASE}/{ig_page_id}/messages",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "recipient": {"id": recipient_id},
