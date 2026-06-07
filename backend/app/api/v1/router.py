@@ -4,6 +4,7 @@ from app.api.v1 import (
     compliance_rules, recommendation_rules, prompts,
     conversations, logs, leads, embedding_status,
     secrets, bot_protection, notifications, chat, embed, widget, ws_chat, upload,
+    webhooks,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -73,3 +74,6 @@ api_router.include_router(ws_chat.router)
 
 # File Upload (brand-scoped, S3)
 api_router.include_router(upload.router)
+
+# Webhooks (WhatsApp + Instagram — receives messages from Meta)
+api_router.include_router(webhooks.router)

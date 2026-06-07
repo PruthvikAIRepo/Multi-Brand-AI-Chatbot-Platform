@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Encryption key for AES-256 (secrets, lead PII)
     ENCRYPTION_KEY: str = "change-this-32-byte-key-in-prod!"
 
+    # Meta (WhatsApp + Instagram)
+    META_WEBHOOK_VERIFY_TOKEN: str = "chatbot_webhook_verify_2026"
+    META_APP_SECRET: str = ""  # For webhook signature verification
+
     # reCAPTCHA
     RECAPTCHA_SECRET_KEY: str = ""
 
