@@ -1,11 +1,11 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest
 from app.services import user_service
 from app.core.permissions import require_super_admin
-from app.core.response import api_response
+from app.core.response import api_response, paginated_response
 from app.models.user import User
 
 router = APIRouter(prefix="/users", tags=["User Management"])
@@ -26,12 +26,14 @@ async def invite_user(
 
 @router.get("", response_model=dict)
 async def list_users(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all admin users. Super Admin only."""
-    users = await user_service.list_users(db)
-    return api_response(data=users)
+    """List all admin users with pagination. Super Admin only."""
+    users, total = await user_service.list_users(db, page, per_page)
+    return paginated_response(data=users, total=total, page=page, per_page=per_page)
 
 
 @router.get("/{user_id}", response_model=dict)
@@ -63,7 +65,7 @@ async def deactivate_user(
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a user (revoke access). Super Admin only."""
+    """Deactivate a user and revoke all their tokens. Super Admin only."""
     result = await user_service.deactivate_user(db, user_id, current_user.id)
     return api_response(data=result, message="User deactivated")
 

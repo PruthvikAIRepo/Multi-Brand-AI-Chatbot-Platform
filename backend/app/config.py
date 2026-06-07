@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # Server
     CORS_ORIGINS: str = "http://localhost:3000"
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str = "production"  # Explicit "development" in .env for dev mode
 
     @property
     def cors_origins_list(self) -> list[str]:

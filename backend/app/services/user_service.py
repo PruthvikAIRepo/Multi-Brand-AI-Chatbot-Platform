@@ -4,11 +4,11 @@ from uuid import UUID
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.models.user import User, UserBrandAssignment
+from app.models.user import User, UserBrandAssignment, RefreshToken
 from app.models.brand import Brand
 from app.models.enums import UserRole
 from app.core.security import hash_password
-from app.core.exceptions import NotFoundError, AlreadyExistsError, BadRequestError, ForbiddenError
+from app.core.exceptions import NotFoundError, AlreadyExistsError, BadRequestError
 
 
 def _generate_temp_password(length: int = 12) -> str:
@@ -25,10 +25,17 @@ async def invite_user(
     brand_ids: list[UUID],
 ) -> dict:
     """Invite a new admin user. Super Admin only."""
+    # Block creating Super Admin via invite
+    if role == UserRole.SUPER_ADMIN:
+        raise BadRequestError("Cannot invite Super Admin users. Only one Super Admin exists (seed account).")
+
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
         raise AlreadyExistsError("User", "email", email)
+
+    # Deduplicate brand_ids
+    brand_ids = list(set(brand_ids))
 
     # Validate brand_ids exist
     if brand_ids:
@@ -40,7 +47,7 @@ async def invite_user(
             raise BadRequestError("One or more brand IDs are invalid")
 
     # Admin role requires at least one brand assignment
-    if role == UserRole.ADMIN and not brand_ids:
+    if not brand_ids:
         raise BadRequestError("Admin users must be assigned to at least one brand")
 
     # Generate temporary password
@@ -59,8 +66,7 @@ async def invite_user(
 
     # Assign brands
     for brand_id in brand_ids:
-        assignment = UserBrandAssignment(user_id=user.id, brand_id=brand_id)
-        db.add(assignment)
+        db.add(UserBrandAssignment(user_id=user.id, brand_id=brand_id))
 
     await db.flush()
 
@@ -74,16 +80,23 @@ async def invite_user(
     }
 
 
-async def list_users(db: AsyncSession) -> list[dict]:
-    """List all users with their brand assignments."""
+async def list_users(db: AsyncSession, page: int = 1, per_page: int = 20) -> tuple[list[dict], int]:
+    """List all users with their brand assignments. Paginated."""
+    # Count total
+    count_result = await db.execute(select(func.count()).select_from(User))
+    total = count_result.scalar()
+
+    # Fetch page
     result = await db.execute(
         select(User)
         .options(selectinload(User.brand_assignments).selectinload(UserBrandAssignment.brand))
         .order_by(User.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
     )
     users = result.scalars().all()
 
-    return [
+    data = [
         {
             "id": str(u.id),
             "email": u.email,
@@ -100,6 +113,8 @@ async def list_users(db: AsyncSession) -> list[dict]:
         }
         for u in users
     ]
+
+    return data, total
 
 
 async def get_user(db: AsyncSession, user_id: UUID) -> dict:
@@ -139,16 +154,18 @@ async def update_user_brands(db: AsyncSession, user_id: UUID, brand_ids: list[UU
     if user.role == UserRole.SUPER_ADMIN:
         raise BadRequestError("Cannot assign brands to Super Admin — they have access to all brands")
 
-    # Validate brand_ids
-    if brand_ids:
-        result = await db.execute(
-            select(func.count()).select_from(Brand).where(Brand.id.in_(brand_ids))
-        )
-        if result.scalar() != len(brand_ids):
-            raise BadRequestError("One or more brand IDs are invalid")
+    # Deduplicate
+    brand_ids = list(set(brand_ids))
 
     if not brand_ids:
         raise BadRequestError("Admin users must be assigned to at least one brand")
+
+    # Validate brand_ids
+    result = await db.execute(
+        select(func.count()).select_from(Brand).where(Brand.id.in_(brand_ids))
+    )
+    if result.scalar() != len(brand_ids):
+        raise BadRequestError("One or more brand IDs are invalid")
 
     # Remove existing assignments
     result = await db.execute(
@@ -167,7 +184,7 @@ async def update_user_brands(db: AsyncSession, user_id: UUID, brand_ids: list[UU
 
 
 async def deactivate_user(db: AsyncSession, user_id: UUID, current_user_id: UUID) -> dict:
-    """Deactivate a user (revoke access). Super Admin only."""
+    """Deactivate a user and revoke all their refresh tokens."""
     if user_id == current_user_id:
         raise BadRequestError("You cannot deactivate your own account")
 
@@ -177,6 +194,17 @@ async def deactivate_user(db: AsyncSession, user_id: UUID, current_user_id: UUID
         raise NotFoundError("User", str(user_id))
 
     user.is_active = False
+
+    # Revoke all refresh tokens so they can't get new access tokens
+    tokens = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked == False,
+        )
+    )
+    for token in tokens.scalars().all():
+        token.revoked = True
+
     await db.flush()
 
     return {"id": str(user.id), "email": user.email, "is_active": False}

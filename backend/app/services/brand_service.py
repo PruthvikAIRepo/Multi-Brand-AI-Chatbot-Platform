@@ -1,6 +1,6 @@
 import re
 from uuid import UUID
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.brand import Brand
@@ -10,8 +10,7 @@ from app.models.brand_image_style import BrandImageStyle
 from app.models.moderation_config import ModerationConfig
 from app.models.product import Product
 from app.models.user import User
-from app.models.enums import UserRole
-from app.core.exceptions import NotFoundError, AlreadyExistsError
+from app.core.exceptions import NotFoundError, AlreadyExistsError, BadRequestError
 from app.core.permissions import get_user_brand_ids
 
 
@@ -25,10 +24,10 @@ def _generate_slug(name: str) -> str:
 
 
 async def _ensure_unique_slug(db: AsyncSession, slug: str, exclude_id: UUID | None = None) -> str:
-    """Ensure slug is unique, append number if needed."""
+    """Ensure slug is unique, append number if needed. Max 100 attempts."""
     base_slug = slug
     counter = 1
-    while True:
+    while counter <= 100:
         query = select(Brand).where(Brand.slug == slug)
         if exclude_id:
             query = query.where(Brand.id != exclude_id)
@@ -37,11 +36,11 @@ async def _ensure_unique_slug(db: AsyncSession, slug: str, exclude_id: UUID | No
             return slug
         slug = f"{base_slug}-{counter}"
         counter += 1
+    raise BadRequestError("Unable to generate unique slug. Try a different brand name.")
 
 
 async def create_brand(db: AsyncSession, data: dict) -> dict:
     """Create a new brand with all default config tables."""
-    # Generate slug
     slug = data.get("slug") or _generate_slug(data["name"])
     slug = await _ensure_unique_slug(db, slug)
 
@@ -50,7 +49,6 @@ async def create_brand(db: AsyncSession, data: dict) -> dict:
     if result.scalar_one_or_none():
         raise AlreadyExistsError("Brand", "name", data["name"])
 
-    # Create brand
     brand = Brand(
         name=data["name"],
         slug=slug,
@@ -74,35 +72,49 @@ async def create_brand(db: AsyncSession, data: dict) -> dict:
     return _brand_to_dict(brand, product_count=0)
 
 
-async def list_brands(db: AsyncSession, current_user: User) -> list[dict]:
-    """List brands accessible to the current user."""
-    query = select(Brand).order_by(Brand.created_at.desc())
-
-    # Filter by user's brand access
+async def list_brands(
+    db: AsyncSession, current_user: User, page: int = 1, per_page: int = 20
+) -> tuple[list[dict], int]:
+    """List brands with product counts. Paginated, filtered by role."""
+    # Base filter
     brand_ids = get_user_brand_ids(current_user)
-    if brand_ids is not None:
-        query = query.where(Brand.id.in_(brand_ids))
+    base_filter = Brand.id.in_(brand_ids) if brand_ids is not None else True
 
-    result = await db.execute(query)
-    brands = result.scalars().all()
+    # Count total
+    count_result = await db.execute(
+        select(func.count()).select_from(Brand).where(base_filter)
+    )
+    total = count_result.scalar()
 
-    # Get product counts per brand
-    brand_list = []
-    for brand in brands:
-        count_result = await db.execute(
-            select(func.count()).select_from(Product).where(
-                Product.brand_id == brand.id,
-                Product.deleted_at.is_(None),
-            )
+    # Fetch brands with product count in single query (no N+1)
+    product_count_subq = (
+        select(
+            Product.brand_id,
+            func.count(Product.id).label("product_count"),
         )
-        product_count = count_result.scalar()
+        .where(Product.deleted_at.is_(None))
+        .group_by(Product.brand_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(Brand, func.coalesce(product_count_subq.c.product_count, 0).label("product_count"))
+        .outerjoin(product_count_subq, Brand.id == product_count_subq.c.brand_id)
+        .where(base_filter)
+        .order_by(Brand.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+
+    brand_list = []
+    for brand, product_count in result.all():
         brand_list.append(_brand_to_dict(brand, product_count))
 
-    return brand_list
+    return brand_list, total
 
 
 async def get_brand(db: AsyncSession, brand_id: UUID) -> dict:
-    """Get a single brand with full details."""
+    """Get a single brand with full details and all configs."""
     result = await db.execute(
         select(Brand)
         .options(
@@ -128,7 +140,6 @@ async def get_brand(db: AsyncSession, brand_id: UUID) -> dict:
 
     brand_dict = _brand_to_dict(brand, product_count)
 
-    # Include related configs
     if brand.config:
         brand_dict["config"] = _config_to_dict(brand.config)
     if brand.tone_setting:
@@ -142,14 +153,14 @@ async def get_brand(db: AsyncSession, brand_id: UUID) -> dict:
 
 
 async def update_brand(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
-    """Update brand basic info."""
+    """Update brand basic info. Supports setting fields to null."""
     result = await db.execute(select(Brand).where(Brand.id == brand_id))
     brand = result.scalar_one_or_none()
     if not brand:
         raise NotFoundError("Brand", str(brand_id))
 
     # Check name uniqueness if name is being changed
-    if data.get("name") and data["name"] != brand.name:
+    if "name" in data and data["name"] and data["name"] != brand.name:
         existing = await db.execute(
             select(Brand).where(Brand.name == data["name"], Brand.id != brand_id)
         )
@@ -158,16 +169,27 @@ async def update_brand(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
         brand.name = data["name"]
         brand.slug = await _ensure_unique_slug(db, _generate_slug(data["name"]), brand_id)
 
+    # Update fields — allows setting to None (e.g., clearing logo_url)
     for field in ["logo_url", "primary_color", "secondary_color", "accent_color", "description", "currency", "is_active"]:
-        if field in data and data[field] is not None:
+        if field in data:
             setattr(brand, field, data[field])
 
     await db.flush()
-    return _brand_to_dict(brand)
+
+    # Get product count for response
+    count_result = await db.execute(
+        select(func.count()).select_from(Product).where(
+            Product.brand_id == brand.id,
+            Product.deleted_at.is_(None),
+        )
+    )
+    product_count = count_result.scalar()
+
+    return _brand_to_dict(brand, product_count)
 
 
 async def delete_brand(db: AsyncSession, brand_id: UUID) -> None:
-    """Delete a brand and all related data (CASCADE)."""
+    """Delete a brand and all related data (CASCADE). Irreversible."""
     result = await db.execute(select(Brand).where(Brand.id == brand_id))
     brand = result.scalar_one_or_none()
     if not brand:
@@ -177,7 +199,7 @@ async def delete_brand(db: AsyncSession, brand_id: UUID) -> None:
     await db.flush()
 
 
-# --- Helper functions to convert models to dicts ---
+# --- Helper functions ---
 
 def _brand_to_dict(brand: Brand, product_count: int = 0) -> dict:
     return {
