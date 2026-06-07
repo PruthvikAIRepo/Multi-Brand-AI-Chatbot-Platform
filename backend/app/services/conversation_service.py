@@ -15,7 +15,6 @@ async def list_conversations(
     per_page: int = 20,
     channel: ChannelType | None = None,
     flagged_only: bool = False,
-    search: str | None = None,
 ) -> tuple[list[dict], int]:
     base_filter = [Conversation.brand_id == brand_id]
 

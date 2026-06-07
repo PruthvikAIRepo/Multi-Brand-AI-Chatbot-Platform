@@ -102,6 +102,10 @@ async def publish_draft(db: AsyncSession, brand_id: UUID, user_id: UUID, annotat
         draft.annotation = annotation
 
     await db.flush()
+
+    # Cleanup: keep only last 20 published versions (SRS requirement)
+    await _cleanup_old_versions(db, brand_id)
+
     return _prompt_to_dict(draft)
 
 
@@ -159,6 +163,9 @@ async def restore_version(db: AsyncSession, brand_id: UUID, version_number: int,
     if not old_version:
         raise NotFoundError("Prompt version", str(version_number))
 
+    if old_version.is_draft:
+        raise BadRequestError("Cannot restore a draft. Publish it instead.")
+
     # Archive current live
     live_result = await db.execute(
         select(PromptVersion).where(
@@ -185,6 +192,9 @@ async def restore_version(db: AsyncSession, brand_id: UUID, version_number: int,
     )
     db.add(restored)
     await db.flush()
+
+    await _cleanup_old_versions(db, brand_id)
+
     return _prompt_to_dict(restored)
 
 
@@ -229,6 +239,23 @@ async def diff_versions(db: AsyncSession, brand_id: UUID, version_a: int, versio
 
 
 # --- Helpers ---
+
+async def _cleanup_old_versions(db: AsyncSession, brand_id: UUID, keep: int = 20) -> None:
+    """Keep only the last N published versions. Delete older ones (SRS: 20 versions retained)."""
+    result = await db.execute(
+        select(PromptVersion)
+        .where(
+            PromptVersion.brand_id == brand_id,
+            PromptVersion.is_draft == False,
+            PromptVersion.is_live == False,
+        )
+        .order_by(PromptVersion.version_number.desc())
+        .offset(keep - 1)  # Keep the live + (keep-1) archived = keep total
+    )
+    old_versions = result.scalars().all()
+    for v in old_versions:
+        await db.delete(v)
+
 
 async def _get_next_version(db: AsyncSession, brand_id: UUID) -> int:
     result = await db.execute(

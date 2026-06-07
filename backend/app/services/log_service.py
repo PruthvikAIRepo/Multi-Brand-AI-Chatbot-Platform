@@ -5,220 +5,197 @@ from app.models.logs import (
     AdminActivityLog, ErrorLog, ComplianceLog, ModerationLog,
     RAGRetrievalLog, RecommendationRuleLog, APIUsageLog,
 )
-from app.models.enums import AdminActionType, ErrorType, ModerationReason
+from app.models.enums import AdminActionType, ErrorType, ModerationReason, ApiUsageType
+
+
+async def _paginated_query(db, model, filters, page, per_page, order_col):
+    """Shared pagination helper for all log queries."""
+    count_query = select(func.count()).select_from(model)
+    data_query = select(model).order_by(order_col.desc())
+
+    if filters:
+        count_query = count_query.where(*filters)
+        data_query = data_query.where(*filters)
+
+    total = (await db.execute(count_query)).scalar()
+    result = await db.execute(
+        data_query.offset((page - 1) * per_page).limit(per_page)
+    )
+    return result.scalars().all(), total
 
 
 async def list_admin_activity_logs(
-    db: AsyncSession,
-    page: int = 1,
-    per_page: int = 20,
-    brand_id: UUID | None = None,
-    user_id: UUID | None = None,
+    db: AsyncSession, page: int = 1, per_page: int = 20,
+    brand_id: UUID | None = None, user_id: UUID | None = None,
     action_type: AdminActionType | None = None,
 ) -> tuple[list[dict], int]:
-    base_filter = []
+    filters = []
     if brand_id:
-        base_filter.append(AdminActivityLog.brand_id == brand_id)
+        filters.append(AdminActivityLog.brand_id == brand_id)
     if user_id:
-        base_filter.append(AdminActivityLog.user_id == user_id)
+        filters.append(AdminActivityLog.user_id == user_id)
     if action_type:
-        base_filter.append(AdminActivityLog.action_type == action_type)
+        filters.append(AdminActivityLog.action_type == action_type)
 
-    where_clause = AdminActivityLog.id.is_not(None)  # always-true base
-    if base_filter:
-        where_clause = *base_filter,
-
-    count_result = await db.execute(
-        select(func.count()).select_from(AdminActivityLog).where(*base_filter) if base_filter
-        else select(func.count()).select_from(AdminActivityLog)
+    logs, total = await _paginated_query(
+        db, AdminActivityLog, filters, page, per_page, AdminActivityLog.created_at
     )
-    total = count_result.scalar()
-
-    query = select(AdminActivityLog).order_by(AdminActivityLog.created_at.desc())
-    if base_filter:
-        query = query.where(*base_filter)
-    query = query.offset((page - 1) * per_page).limit(per_page)
-
-    result = await db.execute(query)
-    logs = result.scalars().all()
-
     return [_activity_to_dict(l) for l in logs], total
 
 
 async def list_error_logs(
-    db: AsyncSession,
-    page: int = 1,
-    per_page: int = 20,
-    brand_id: UUID | None = None,
-    error_type: ErrorType | None = None,
+    db: AsyncSession, page: int = 1, per_page: int = 20,
+    brand_id: UUID | None = None, error_type: ErrorType | None = None,
 ) -> tuple[list[dict], int]:
-    base_filter = []
+    filters = []
     if brand_id:
-        base_filter.append(ErrorLog.brand_id == brand_id)
+        filters.append(ErrorLog.brand_id == brand_id)
     if error_type:
-        base_filter.append(ErrorLog.error_type == error_type)
+        filters.append(ErrorLog.error_type == error_type)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(ErrorLog).where(*base_filter) if base_filter
-        else select(func.count()).select_from(ErrorLog)
+    logs, total = await _paginated_query(
+        db, ErrorLog, filters, page, per_page, ErrorLog.created_at
     )
-    total = count_result.scalar()
-
-    query = select(ErrorLog).order_by(ErrorLog.created_at.desc())
-    if base_filter:
-        query = query.where(*base_filter)
-    query = query.offset((page - 1) * per_page).limit(per_page)
-
-    result = await db.execute(query)
-    logs = result.scalars().all()
-
     return [_error_to_dict(l) for l in logs], total
 
 
 async def list_compliance_logs(
-    db: AsyncSession,
-    brand_id: UUID,
-    page: int = 1,
-    per_page: int = 20,
+    db: AsyncSession, brand_id: UUID, page: int = 1, per_page: int = 20,
 ) -> tuple[list[dict], int]:
-    count_result = await db.execute(
-        select(func.count()).select_from(ComplianceLog).where(ComplianceLog.brand_id == brand_id)
+    logs, total = await _paginated_query(
+        db, ComplianceLog, [ComplianceLog.brand_id == brand_id],
+        page, per_page, ComplianceLog.created_at
     )
-    total = count_result.scalar()
-
-    result = await db.execute(
-        select(ComplianceLog)
-        .where(ComplianceLog.brand_id == brand_id)
-        .order_by(ComplianceLog.created_at.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    logs = result.scalars().all()
-
     return [_compliance_to_dict(l) for l in logs], total
 
 
 async def list_moderation_logs(
-    db: AsyncSession,
-    brand_id: UUID,
-    page: int = 1,
-    per_page: int = 20,
+    db: AsyncSession, brand_id: UUID, page: int = 1, per_page: int = 20,
     reason: ModerationReason | None = None,
 ) -> tuple[list[dict], int]:
-    base_filter = [ModerationLog.brand_id == brand_id]
+    filters = [ModerationLog.brand_id == brand_id]
     if reason:
-        base_filter.append(ModerationLog.reason == reason)
+        filters.append(ModerationLog.reason == reason)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(ModerationLog).where(*base_filter)
+    logs, total = await _paginated_query(
+        db, ModerationLog, filters, page, per_page, ModerationLog.created_at
     )
-    total = count_result.scalar()
-
-    result = await db.execute(
-        select(ModerationLog)
-        .where(*base_filter)
-        .order_by(ModerationLog.created_at.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    logs = result.scalars().all()
-
     return [_moderation_to_dict(l) for l in logs], total
 
 
 async def list_rag_logs(
-    db: AsyncSession,
-    brand_id: UUID,
-    page: int = 1,
-    per_page: int = 20,
+    db: AsyncSession, brand_id: UUID, page: int = 1, per_page: int = 20,
     below_threshold_only: bool = False,
 ) -> tuple[list[dict], int]:
-    base_filter = [RAGRetrievalLog.brand_id == brand_id]
+    filters = [RAGRetrievalLog.brand_id == brand_id]
     if below_threshold_only:
-        base_filter.append(RAGRetrievalLog.hit_threshold == False)
+        filters.append(RAGRetrievalLog.hit_threshold == False)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(RAGRetrievalLog).where(*base_filter)
+    logs, total = await _paginated_query(
+        db, RAGRetrievalLog, filters, page, per_page, RAGRetrievalLog.created_at
     )
-    total = count_result.scalar()
-
-    result = await db.execute(
-        select(RAGRetrievalLog)
-        .where(*base_filter)
-        .order_by(RAGRetrievalLog.created_at.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    logs = result.scalars().all()
-
     return [_rag_to_dict(l) for l in logs], total
+
+
+async def list_recommendation_rule_logs(
+    db: AsyncSession, brand_id: UUID, page: int = 1, per_page: int = 20,
+) -> tuple[list[dict], int]:
+    logs, total = await _paginated_query(
+        db, RecommendationRuleLog, [RecommendationRuleLog.brand_id == brand_id],
+        page, per_page, RecommendationRuleLog.created_at
+    )
+    return [_rec_rule_to_dict(l) for l in logs], total
+
+
+async def list_api_usage_logs(
+    db: AsyncSession, page: int = 1, per_page: int = 20,
+    brand_id: UUID | None = None, api_type: ApiUsageType | None = None,
+) -> tuple[list[dict], int]:
+    filters = []
+    if brand_id:
+        filters.append(APIUsageLog.brand_id == brand_id)
+    if api_type:
+        filters.append(APIUsageLog.api_type == api_type)
+
+    logs, total = await _paginated_query(
+        db, APIUsageLog, filters, page, per_page, APIUsageLog.created_at
+    )
+    return [_api_usage_to_dict(l) for l in logs], total
 
 
 # --- Dict converters ---
 
-def _activity_to_dict(log: AdminActivityLog) -> dict:
+def _activity_to_dict(l):
     return {
-        "id": str(log.id),
-        "user_id": str(log.user_id),
-        "brand_id": str(log.brand_id) if log.brand_id else None,
-        "action_type": log.action_type.value if log.action_type else None,
-        "entity_type": log.entity_type,
-        "entity_id": str(log.entity_id) if log.entity_id else None,
-        "entity_name": log.entity_name,
-        "ip_address": log.ip_address,
-        "before_state": log.before_state,
-        "after_state": log.after_state,
-        "created_at": log.created_at.isoformat() if log.created_at else None,
+        "id": str(l.id), "user_id": str(l.user_id),
+        "brand_id": str(l.brand_id) if l.brand_id else None,
+        "action_type": l.action_type.value if l.action_type else None,
+        "entity_type": l.entity_type, "entity_id": str(l.entity_id) if l.entity_id else None,
+        "entity_name": l.entity_name, "ip_address": l.ip_address,
+        "before_state": l.before_state, "after_state": l.after_state,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
     }
 
-
-def _error_to_dict(log: ErrorLog) -> dict:
+def _error_to_dict(l):
     return {
-        "id": str(log.id),
-        "brand_id": str(log.brand_id) if log.brand_id else None,
-        "channel": log.channel.value if log.channel else None,
-        "error_type": log.error_type.value if log.error_type else None,
-        "description": log.description,
-        "created_at": log.created_at.isoformat() if log.created_at else None,
+        "id": str(l.id), "brand_id": str(l.brand_id) if l.brand_id else None,
+        "channel": l.channel.value if l.channel else None,
+        "error_type": l.error_type.value if l.error_type else None,
+        "description": l.description,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
     }
 
-
-def _compliance_to_dict(log: ComplianceLog) -> dict:
+def _compliance_to_dict(l):
     return {
-        "id": str(log.id),
-        "brand_id": str(log.brand_id),
-        "conversation_id": str(log.conversation_id) if log.conversation_id else None,
-        "message_id": str(log.message_id) if log.message_id else None,
-        "original_response": log.original_response,
-        "replacement": log.replacement,
-        "reason": log.reason,
-        "rule_triggered_id": str(log.rule_triggered_id) if log.rule_triggered_id else None,
-        "created_at": log.created_at.isoformat() if log.created_at else None,
+        "id": str(l.id), "brand_id": str(l.brand_id),
+        "conversation_id": str(l.conversation_id) if l.conversation_id else None,
+        "message_id": str(l.message_id) if l.message_id else None,
+        "original_response": l.original_response, "replacement": l.replacement,
+        "reason": l.reason,
+        "rule_triggered_id": str(l.rule_triggered_id) if l.rule_triggered_id else None,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
     }
 
-
-def _moderation_to_dict(log: ModerationLog) -> dict:
+def _moderation_to_dict(l):
     return {
-        "id": str(log.id),
-        "brand_id": str(log.brand_id),
-        "conversation_id": str(log.conversation_id) if log.conversation_id else None,
-        "user_identifier": log.user_identifier,
-        "blocked_input": log.blocked_input,
-        "reason": log.reason.value if log.reason else None,
-        "action_taken": log.action_taken.value if log.action_taken else None,
-        "created_at": log.created_at.isoformat() if log.created_at else None,
+        "id": str(l.id), "brand_id": str(l.brand_id),
+        "conversation_id": str(l.conversation_id) if l.conversation_id else None,
+        "user_identifier": l.user_identifier, "blocked_input": l.blocked_input,
+        "reason": l.reason.value if l.reason else None,
+        "action_taken": l.action_taken.value if l.action_taken else None,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
     }
 
-
-def _rag_to_dict(log: RAGRetrievalLog) -> dict:
+def _rag_to_dict(l):
     return {
-        "id": str(log.id),
-        "brand_id": str(log.brand_id),
-        "conversation_id": str(log.conversation_id) if log.conversation_id else None,
-        "user_query": log.user_query,
-        "chunks_retrieved": log.chunks_retrieved,
-        "chunks_retrieved_count": log.chunks_retrieved_count,
-        "top_similarity_score": log.top_similarity_score,
-        "hit_threshold": log.hit_threshold,
-        "created_at": log.created_at.isoformat() if log.created_at else None,
+        "id": str(l.id), "brand_id": str(l.brand_id),
+        "conversation_id": str(l.conversation_id) if l.conversation_id else None,
+        "user_query": l.user_query, "chunks_retrieved": l.chunks_retrieved,
+        "chunks_retrieved_count": l.chunks_retrieved_count,
+        "top_similarity_score": l.top_similarity_score,
+        "hit_threshold": l.hit_threshold,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
+    }
+
+def _rec_rule_to_dict(l):
+    return {
+        "id": str(l.id), "brand_id": str(l.brand_id),
+        "conversation_id": str(l.conversation_id) if l.conversation_id else None,
+        "user_input_summary": l.user_input_summary,
+        "skin_type": l.skin_type.value if l.skin_type else None,
+        "concerns": l.concerns, "matched_products": l.matched_products,
+        "matched_count": l.matched_count, "excluded_products": l.excluded_products,
+        "excluded_count": l.excluded_count, "applied_filters": l.applied_filters,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
+    }
+
+def _api_usage_to_dict(l):
+    return {
+        "id": str(l.id), "brand_id": str(l.brand_id),
+        "conversation_id": str(l.conversation_id) if l.conversation_id else None,
+        "api_type": l.api_type.value if l.api_type else None,
+        "tokens_in": l.tokens_in, "tokens_out": l.tokens_out,
+        "chunks_count": l.chunks_count, "model": l.model,
+        "latency_ms": l.latency_ms,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
     }

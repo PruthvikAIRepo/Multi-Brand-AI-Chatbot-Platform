@@ -1,5 +1,6 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.services import conversation_service
@@ -7,6 +8,11 @@ from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
 from app.models.enums import ChannelType
+
+
+class FlagRequest(BaseModel):
+    reason: str | None = None
+
 
 router = APIRouter(prefix="/brands/{brand_id}/conversations", tags=["Conversations"])
 
@@ -46,13 +52,13 @@ async def get_conversation(
 async def flag_conversation(
     brand_id: UUID,
     conversation_id: UUID,
-    reason: str | None = None,
+    request: FlagRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Flag a conversation for review. Requires conversations.view."""
     await check_brand_permission(db, current_user, brand_id, "conversations.view")
-    data = await conversation_service.flag_conversation(db, brand_id, conversation_id, reason)
+    data = await conversation_service.flag_conversation(db, brand_id, conversation_id, request.reason)
     return api_response(data=data, message="Conversation flagged")
 
 
