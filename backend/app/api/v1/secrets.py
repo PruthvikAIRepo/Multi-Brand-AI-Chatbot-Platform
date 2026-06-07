@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.services import secret_service
+from app.services import secret_service, audit_service
 from app.core.permissions import require_super_admin
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import SecretType
+from app.models.enums import SecretType, AdminActionType
 
 router = APIRouter(prefix="/secrets", tags=["Secret Management"])
 
@@ -31,6 +31,11 @@ async def create_secret(
     """Add a new secret (API key, token). Super Admin only. Value encrypted immediately."""
     secret = await secret_service.create_secret(
         db, request.brand_id, request.secret_type, request.value
+    )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "secret",
+        entity_id=secret.get("id"), brand_id=request.brand_id,
+        entity_name=request.secret_type.value,
     )
     return api_response(data=secret, message="Secret added securely")
 
@@ -57,6 +62,10 @@ async def update_secret(
 ):
     """Replace a secret value. Old value is never visible. Super Admin only."""
     secret = await secret_service.update_secret(db, secret_id, request.value)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "secret",
+        entity_id=secret_id,
+    )
     return api_response(data=secret, message="Secret updated")
 
 
@@ -68,6 +77,10 @@ async def delete_secret(
 ):
     """Delete a secret. Super Admin only."""
     await secret_service.delete_secret(db, secret_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "secret",
+        entity_id=secret_id,
+    )
     return api_response(message="Secret deleted")
 
 

@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.services import conversation_service
+from app.services import conversation_service, audit_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import ChannelType
+from app.models.enums import ChannelType, AdminActionType
 
 
 class FlagRequest(BaseModel):
@@ -59,6 +59,10 @@ async def flag_conversation(
     """Flag a conversation for review. Requires conversations.view."""
     await check_brand_permission(db, current_user, brand_id, "conversations.view")
     data = await conversation_service.flag_conversation(db, brand_id, conversation_id, request.reason)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "conversation",
+        entity_id=conversation_id, brand_id=brand_id, entity_name="flagged",
+    )
     return api_response(data=data, message="Conversation flagged")
 
 
@@ -72,6 +76,10 @@ async def unflag_conversation(
     """Remove flag from conversation. Requires conversations.view."""
     await check_brand_permission(db, current_user, brand_id, "conversations.view")
     data = await conversation_service.unflag_conversation(db, brand_id, conversation_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "conversation",
+        entity_id=conversation_id, brand_id=brand_id, entity_name="unflagged",
+    )
     return api_response(data=data, message="Conversation unflagged")
 
 
@@ -85,4 +93,8 @@ async def delete_conversation(
     """GDPR: Permanently delete a conversation and all its messages. Requires leads.delete."""
     await check_brand_permission(db, current_user, brand_id, "leads.delete")
     await conversation_service.delete_conversation(db, brand_id, conversation_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "conversation",
+        entity_id=conversation_id, brand_id=brand_id,
+    )
     return api_response(message="Conversation deleted permanently")

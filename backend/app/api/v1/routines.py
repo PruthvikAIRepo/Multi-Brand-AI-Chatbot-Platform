@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.routine import RoutineCreateRequest, RoutineUpdateRequest
-from app.services import routine_service
+from app.services import routine_service, audit_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import SkinType
+from app.models.enums import SkinType, AdminActionType
 
 router = APIRouter(prefix="/brands/{brand_id}/routines", tags=["Routines"])
 
@@ -22,6 +22,10 @@ async def create_routine(
     """Create a routine with steps. Validates products belong to same brand. Requires routines.edit."""
     await check_brand_permission(db, current_user, brand_id, "routines.edit")
     routine = await routine_service.create_routine(db, brand_id, request.model_dump())
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "routine",
+        entity_id=routine.get("id"), brand_id=brand_id, entity_name=routine.get("name"),
+    )
     return api_response(data=routine, message="Routine created successfully")
 
 
@@ -85,6 +89,10 @@ async def update_routine(
     routine = await routine_service.update_routine(
         db, brand_id, routine_id, request.model_dump(exclude_unset=True)
     )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "routine",
+        entity_id=routine_id, brand_id=brand_id, entity_name=routine.get("name"),
+    )
     return api_response(data=routine, message="Routine updated successfully")
 
 
@@ -98,6 +106,10 @@ async def delete_routine(
     """Soft delete a routine. Requires routines.edit."""
     await check_brand_permission(db, current_user, brand_id, "routines.edit")
     await routine_service.delete_routine(db, brand_id, routine_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "routine",
+        entity_id=routine_id, brand_id=brand_id,
+    )
     return api_response(message="Routine deleted successfully")
 
 
@@ -111,4 +123,8 @@ async def restore_routine(
     """Restore a soft-deleted routine. Requires routines.edit."""
     await check_brand_permission(db, current_user, brand_id, "routines.edit")
     routine = await routine_service.restore_routine(db, brand_id, routine_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.RESTORED, "routine",
+        entity_id=routine_id, brand_id=brand_id, entity_name=routine.get("name"),
+    )
     return api_response(data=routine, message="Routine restored successfully")

@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.prompt import PromptDraftRequest, PromptPublishRequest, PromptDiffRequest
-from app.services import prompt_service
+from app.services import prompt_service, audit_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
+from app.models.enums import AdminActionType
 
 router = APIRouter(prefix="/brands/{brand_id}/prompt", tags=["Prompt Management"])
 
@@ -47,6 +48,10 @@ async def save_draft(
     draft = await prompt_service.save_draft(
         db, brand_id, current_user.id, request.content, request.annotation
     )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "prompt_draft",
+        entity_id=draft.get("id"), brand_id=brand_id,
+    )
     return api_response(data=draft, message="Draft saved")
 
 
@@ -60,6 +65,10 @@ async def publish_draft(
     """Publish the current draft as live. Old live version is archived. Requires prompt.edit."""
     await check_brand_permission(db, current_user, brand_id, "prompt.edit")
     prompt = await prompt_service.publish_draft(db, brand_id, current_user.id, request.annotation)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.PUBLISHED, "prompt",
+        entity_id=prompt.get("id"), brand_id=brand_id,
+    )
     return api_response(data=prompt, message="Prompt published and is now live")
 
 
@@ -100,6 +109,11 @@ async def restore_version(
     """Restore an old version as the new live prompt. Requires prompt.edit."""
     await check_brand_permission(db, current_user, brand_id, "prompt.edit")
     prompt = await prompt_service.restore_version(db, brand_id, version_number, current_user.id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.RESTORED, "prompt",
+        entity_id=prompt.get("id"), brand_id=brand_id,
+        entity_name=f"version {version_number}",
+    )
     return api_response(data=prompt, message=f"Version {version_number} restored as live")
 
 

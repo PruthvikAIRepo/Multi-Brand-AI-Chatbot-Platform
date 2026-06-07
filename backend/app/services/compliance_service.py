@@ -105,4 +105,3 @@ def _is_whitelisted(text: str, allowed_phrases: list[str]) -> bool:
 # Note: conversation_boundary rules are enforced via the system prompt (tone_service),
 # not via post-response filtering. The AI is instructed to follow boundaries,
 # and violations would need NLP analysis to detect (beyond simple pattern matching).
-    return False

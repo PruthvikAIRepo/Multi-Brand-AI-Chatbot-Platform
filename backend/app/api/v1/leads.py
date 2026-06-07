@@ -5,11 +5,11 @@ import io
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.lead import LeadCreateRequest
-from app.services import lead_service
+from app.services import lead_service, audit_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import ChannelType
+from app.models.enums import ChannelType, AdminActionType
 
 router = APIRouter(prefix="/brands/{brand_id}/leads", tags=["Leads"])
 
@@ -83,4 +83,8 @@ async def delete_lead(
     """GDPR: Permanently delete a lead. Requires leads.delete."""
     await check_brand_permission(db, current_user, brand_id, "leads.delete")
     await lead_service.delete_lead(db, brand_id, lead_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "lead",
+        entity_id=lead_id, brand_id=brand_id,
+    )
     return api_response(message="Lead deleted permanently")

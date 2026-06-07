@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.services import bot_protection_service
+from app.services import bot_protection_service, audit_service
 from app.core.permissions import require_super_admin
 from app.core.response import api_response, paginated_response
 from app.models.user import User
+from app.models.enums import AdminActionType
 
 router = APIRouter(prefix="/bot-protection", tags=["Bot Protection"])
 
@@ -33,6 +34,10 @@ async def block_ip(
     result = await bot_protection_service.block_ip(
         db, request.ip_address, request.brand_id, current_user.id, request.reason
     )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "ip_block",
+        brand_id=request.brand_id, entity_name=request.ip_address,
+    )
     return api_response(data=result, message="IP blocked")
 
 
@@ -57,6 +62,10 @@ async def unblock_ip(
 ):
     """Unblock an IP. Super Admin only."""
     await bot_protection_service.unblock_ip(db, entry_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "ip_block",
+        entity_id=entry_id,
+    )
     return api_response(message="IP unblocked")
 
 
@@ -69,6 +78,10 @@ async def block_user_identifier(
     """Block a user identifier. Super Admin only."""
     result = await bot_protection_service.block_user(
         db, request.user_identifier, request.brand_id, current_user.id, request.reason
+    )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "user_block",
+        brand_id=request.brand_id, entity_name=request.user_identifier,
     )
     return api_response(data=result, message="User blocked")
 
@@ -94,4 +107,8 @@ async def unblock_user(
 ):
     """Unblock a user. Super Admin only."""
     await bot_protection_service.unblock_user(db, entry_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "user_block",
+        entity_id=entry_id,
+    )
     return api_response(message="User unblocked")

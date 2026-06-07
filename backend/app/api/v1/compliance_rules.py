@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.compliance_rule import ComplianceRuleCreateRequest, ComplianceRuleUpdateRequest
-from app.services import compliance_rule_service
+from app.services import compliance_rule_service, audit_service
 from app.core.permissions import get_current_user, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
-from app.models.enums import ComplianceRuleType
+from app.models.enums import ComplianceRuleType, AdminActionType
 
 router = APIRouter(prefix="/brands/{brand_id}/compliance-rules", tags=["Compliance Rules"])
 
@@ -22,6 +22,10 @@ async def create_rule(
     """Create a compliance rule. Requires compliance.edit."""
     await check_brand_permission(db, current_user, brand_id, "compliance.edit")
     rule = await compliance_rule_service.create_rule(db, brand_id, request.model_dump())
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.CREATED, "compliance_rule",
+        entity_id=rule.get("id"), brand_id=brand_id, entity_name=rule.get("name"),
+    )
     return api_response(data=rule, message="Compliance rule created")
 
 
@@ -69,6 +73,10 @@ async def update_rule(
     rule = await compliance_rule_service.update_rule(
         db, brand_id, rule_id, request.model_dump(exclude_unset=True)
     )
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "compliance_rule",
+        entity_id=rule_id, brand_id=brand_id, entity_name=rule.get("name"),
+    )
     return api_response(data=rule, message="Compliance rule updated")
 
 
@@ -82,4 +90,8 @@ async def delete_rule(
     """Delete a compliance rule (hard delete). Requires compliance.edit."""
     await check_brand_permission(db, current_user, brand_id, "compliance.edit")
     await compliance_rule_service.delete_rule(db, brand_id, rule_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DELETED, "compliance_rule",
+        entity_id=rule_id, brand_id=brand_id,
+    )
     return api_response(message="Compliance rule deleted")
