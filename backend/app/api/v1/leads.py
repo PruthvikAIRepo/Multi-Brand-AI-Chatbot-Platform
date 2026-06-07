@@ -21,8 +21,8 @@ async def create_lead(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create or update a lead (dedup by email). Requires leads.view permission."""
-    await check_brand_permission(db, current_user, brand_id, "leads.view")
+    """Create or update a lead (dedup by email). Requires leads.create permission."""
+    await check_brand_permission(db, current_user, brand_id, "leads.create")
     lead = await lead_service.create_or_update_lead(db, brand_id, request.model_dump())
     return api_response(data=lead, message="Lead captured successfully")
 

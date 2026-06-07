@@ -9,6 +9,10 @@ from app.core.encryption import encrypt, decrypt, hash_value, mask_email, mask_p
 from app.core.exceptions import NotFoundError
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 async def create_or_update_lead(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
     """Create a lead or update existing one (matched by email hash). SRS: dedup by email."""
     email = data["email"].lower().strip()
@@ -34,7 +38,11 @@ async def create_or_update_lead(db: AsyncSession, brand_id: UUID, data: dict) ->
         if data.get("conversation_id"):
             existing.conversation_id = data["conversation_id"]
         await db.flush()
-        return _lead_to_dict(existing, email, data.get("phone"))
+        # Decrypt existing phone if update didn't provide one
+        phone = data.get("phone")
+        if not phone and existing.phone_encrypted:
+            phone = decrypt(existing.phone_encrypted)
+        return _lead_to_dict(existing, email, phone)
 
     # Create new lead
     lead = Lead(
@@ -67,7 +75,8 @@ async def list_leads(
     if channel:
         base_filter.append(Lead.channel == channel)
     if search:
-        base_filter.append(Lead.name.ilike(f"%{search}%"))
+        safe = _escape_like(search)
+        base_filter.append(Lead.name.ilike(f"%{safe}%"))
 
     count_result = await db.execute(
         select(func.count()).select_from(Lead).where(*base_filter)

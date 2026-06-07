@@ -51,6 +51,7 @@ ALL_BRAND_PERMISSIONS = [
 
     # Leads
     "leads.view",
+    "leads.create",
     "leads.export",
     "leads.delete",
 
