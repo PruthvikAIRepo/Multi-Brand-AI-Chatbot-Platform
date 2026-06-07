@@ -240,7 +240,7 @@ async def update_image_styles(db: AsyncSession, brand_id: UUID, data: dict) -> d
     return _image_style_to_dict(style)
 
 
-async def update_chatbot_status(db: AsyncSession, brand_id: UUID, status: str) -> dict:
+async def update_chatbot_status(db: AsyncSession, brand_id: UUID, status) -> dict:
     """Change chatbot status: normal / safe_mode / disabled (emergency override)."""
     result = await db.execute(select(Brand).where(Brand.id == brand_id))
     brand = result.scalar_one_or_none()

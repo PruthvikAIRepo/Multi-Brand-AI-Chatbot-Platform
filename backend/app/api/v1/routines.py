@@ -54,10 +54,9 @@ async def list_deleted_routines(
     """List soft-deleted routines. Requires routines.edit."""
     await check_brand_permission(db, current_user, brand_id, "routines.edit")
     routines, total = await routine_service.list_routines(
-        db, brand_id, page, per_page, include_deleted=True, active_only=False
+        db, brand_id, page, per_page, active_only=False, deleted_only=True
     )
-    deleted = [r for r in routines if r.get("is_deleted")]
-    return paginated_response(data=deleted, total=len(deleted), page=page, per_page=per_page)
+    return paginated_response(data=routines, total=total, page=page, per_page=per_page)
 
 
 @router.get("/{routine_id}", response_model=dict)

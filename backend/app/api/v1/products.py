@@ -59,11 +59,9 @@ async def list_deleted_products(
     """List soft-deleted products for review/restore. Requires products.edit permission."""
     await check_brand_permission(db, current_user, brand_id, "products.edit")
     products, total = await product_service.list_products(
-        db, brand_id, page, per_page, include_deleted=True
+        db, brand_id, page, per_page, deleted_only=True
     )
-    # Filter to only deleted ones
-    deleted = [p for p in products if p.get("is_deleted")]
-    return paginated_response(data=deleted, total=len(deleted), page=page, per_page=per_page)
+    return paginated_response(data=products, total=total, page=page, per_page=per_page)
 
 
 @router.get("/{product_id}", response_model=dict)

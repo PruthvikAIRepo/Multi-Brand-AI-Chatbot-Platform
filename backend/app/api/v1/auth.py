@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.auth import (
@@ -93,16 +94,19 @@ async def get_me(current_user: User = Depends(get_current_user)):
     })
 
 
+class UpdateProfileRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+
+
 @router.put("/me", response_model=dict)
 async def update_profile(
-    request: dict,
+    request: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update own profile (full_name)."""
-    if "full_name" in request:
-        current_user.full_name = request["full_name"]
-        await db.flush()
+    current_user.full_name = request.full_name
+    await db.flush()
     return api_response(data={
         "id": str(current_user.id),
         "email": current_user.email,

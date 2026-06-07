@@ -50,9 +50,8 @@ async def list_deleted_faqs(
 ):
     """List soft-deleted FAQs for review/restore. Requires faqs.edit permission."""
     await check_brand_permission(db, current_user, brand_id, "faqs.edit")
-    faqs, total = await faq_service.list_faqs(db, brand_id, page, per_page, include_deleted=True)
-    deleted = [f for f in faqs if f.get("is_deleted")]
-    return paginated_response(data=deleted, total=len(deleted), page=page, per_page=per_page)
+    faqs, total = await faq_service.list_faqs(db, brand_id, page, per_page, deleted_only=True)
+    return paginated_response(data=faqs, total=total, page=page, per_page=per_page)
 
 
 @router.get("/{faq_id}", response_model=dict)

@@ -41,10 +41,13 @@ async def list_faqs(
     category: str | None = None,
     search: str | None = None,
     include_deleted: bool = False,
+    deleted_only: bool = False,
 ) -> tuple[list[dict], int]:
     base_filter = [FAQ.brand_id == brand_id]
 
-    if not include_deleted:
+    if deleted_only:
+        base_filter.append(FAQ.deleted_at.is_not(None))
+    elif not include_deleted:
         base_filter.append(FAQ.deleted_at.is_(None))
 
     if category:

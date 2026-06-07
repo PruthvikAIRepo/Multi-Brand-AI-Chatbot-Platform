@@ -36,6 +36,16 @@ async def list_users(
     return paginated_response(data=users, total=total, page=page, per_page=per_page)
 
 
+# Fixed: /permissions/all BEFORE /{user_id} to prevent route conflict
+@router.get("/permissions/all", response_model=dict)
+async def list_all_permissions(
+    current_user: User = Depends(require_super_admin),
+):
+    """List all available permissions. Useful for the UI to show checkboxes."""
+    from app.core.permissions import ALL_BRAND_PERMISSIONS
+    return api_response(data=ALL_BRAND_PERMISSIONS)
+
+
 @router.get("/{user_id}", response_model=dict)
 async def get_user(
     user_id: UUID,
@@ -70,15 +80,6 @@ async def update_user_permissions(
     """Update permissions for a user on a specific brand. Super Admin only."""
     result = await user_service.update_user_permissions(db, user_id, brand_id, request.permissions)
     return api_response(data=result, message="Permissions updated")
-
-
-@router.get("/permissions/all", response_model=dict)
-async def list_all_permissions(
-    current_user: User = Depends(require_super_admin),
-):
-    """List all available permissions. Useful for the UI to show checkboxes."""
-    from app.core.permissions import ALL_BRAND_PERMISSIONS
-    return api_response(data=ALL_BRAND_PERMISSIONS)
 
 
 @router.post("/{user_id}/deactivate", response_model=dict)

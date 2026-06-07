@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.recommendation_rule import RecommendationRule
 from app.models.product import Product, ProductSkinType, ProductConcern
+from app.models.brand_config import BrandConfig
 from app.models.enums import RecommendationRuleType, SkinType, SkinConcern
 from app.core.exceptions import NotFoundError
 
@@ -107,11 +108,17 @@ async def test_rules(
     concerns: list[SkinConcern],
     preferences: list[str],
 ) -> dict:
-    """Simulate the recommendation rules engine against a test profile.
-    Returns matched products, excluded products, and applied filters."""
+    """Simulate the recommendation rules engine.
+    SRS Section 24.2: Rules engine filters → Priority sort → Top N → AI presents.
+    This endpoint shows the rules engine output (before AI presentation)."""
 
-    # 1. Get all active products for this brand that match the skin type
-    product_query = (
+    # Get brand config for top_n
+    config_result = await db.execute(select(BrandConfig).where(BrandConfig.brand_id == brand_id))
+    brand_config = config_result.scalar_one_or_none()
+    top_n = brand_config.recommendation_top_n if brand_config else 3
+
+    # Step 1: Get all in-stock, non-deleted products
+    result = await db.execute(
         select(Product)
         .options(selectinload(Product.skin_types), selectinload(Product.concerns))
         .where(
@@ -120,24 +127,31 @@ async def test_rules(
             Product.is_in_stock == True,
         )
     )
-    result = await db.execute(product_query)
     all_products = result.scalars().unique().all()
 
-    # 2. Filter by skin type
+    if not all_products:
+        return _fallback_response(skin_type, concerns, preferences, "no_products",
+                                  "No products available for this brand")
+
+    # Step 2: Filter by skin type
     skin_matched = []
     for p in all_products:
         product_skin_types = {st.skin_type for st in p.skin_types}
-        if skin_type in product_skin_types or not product_skin_types:
+        if not product_skin_types or skin_type in product_skin_types:
             skin_matched.append(p)
 
-    # 3. Score by concern match
-    scored = []
+    if not skin_matched:
+        return _fallback_response(skin_type, concerns, preferences, "no_skin_match",
+                                  "No products match the given skin type")
+
+    # Step 3: Base scoring — concern match + product priority_score
+    product_scores: dict[UUID, float] = {}
     for p in skin_matched:
         product_concerns = {c.concern for c in p.concerns}
-        concern_match_count = len(product_concerns.intersection(set(concerns)))
-        scored.append((p, concern_match_count + p.priority_score))
+        concern_match = len(product_concerns.intersection(set(concerns)))
+        product_scores[p.id] = concern_match + p.priority_score
 
-    # 4. Get all active rules
+    # Step 4: Get all active rules
     rules_result = await db.execute(
         select(RecommendationRule).where(
             RecommendationRule.brand_id == brand_id,
@@ -146,45 +160,93 @@ async def test_rules(
     )
     rules = rules_result.scalars().all()
 
-    # 5. Apply exclusion and conflict rules
+    # Step 5: Apply priority rules (override/boost scores)
+    for rule in rules:
+        if rule.rule_type == RecommendationRuleType.PRIORITY:
+            pid = rule.config.get("product_id")
+            boost = rule.config.get("priority_score", 0)
+            if pid and UUID(pid) in product_scores:
+                product_scores[UUID(pid)] += boost
+
+    # Step 6: Apply suitability matrix rules (multi-axis scoring)
+    for rule in rules:
+        if rule.rule_type == RecommendationRuleType.SUITABILITY:
+            pid = rule.config.get("product_id")
+            if not pid or UUID(pid) not in product_scores:
+                continue
+            skin_scores = rule.config.get("skin_type_scores", {})
+            concern_scores = rule.config.get("concern_scores", {})
+            # Add skin type suitability score
+            product_scores[UUID(pid)] += skin_scores.get(skin_type.value, 0)
+            # Add concern suitability scores
+            for c in concerns:
+                product_scores[UUID(pid)] += concern_scores.get(c.value, 0)
+
+    # Step 7: Apply exclusion rules
     excluded = []
     excluded_ids = set()
 
     for rule in rules:
         if rule.rule_type == RecommendationRuleType.EXCLUSION:
-            product_id = rule.config.get("product_id")
+            pid = rule.config.get("product_id")
+            if not pid or UUID(pid) not in product_scores:
+                continue
             excluded_for_skin = rule.config.get("excluded_for_skin_types", [])
             excluded_for_concerns = rule.config.get("excluded_for_concerns", [])
 
-            if skin_type.value in excluded_for_skin or any(c.value in excluded_for_concerns for c in concerns):
+            should_exclude = (
+                skin_type.value in excluded_for_skin
+                or any(c.value in excluded_for_concerns for c in concerns)
+            )
+            if should_exclude:
                 excluded.append({
-                    "product_id": product_id,
-                    "reason": f"Exclusion rule: {rule.description or rule.config}",
+                    "product_id": pid,
+                    "reason": f"Exclusion rule: {rule.description or 'Excluded for this profile'}",
                     "rule_id": str(rule.id),
                 })
-                excluded_ids.add(product_id)
+                excluded_ids.add(UUID(pid))
 
-        elif rule.rule_type == RecommendationRuleType.CONFLICT:
-            # Conflict rules remove one product if both are present
+    # Step 8: Apply conflict rules (remove the LOWER-scored product)
+    for rule in rules:
+        if rule.rule_type == RecommendationRuleType.CONFLICT:
             a_id = rule.config.get("product_a_id")
             b_id = rule.config.get("product_b_id")
-            matched_ids = {str(p.id) for p, _ in scored}
+            if not a_id or not b_id:
+                continue
 
-            if a_id in matched_ids and b_id in matched_ids:
-                # Remove the lower-priority one
+            a_uuid = UUID(a_id)
+            b_uuid = UUID(b_id)
+
+            a_in = a_uuid in product_scores and a_uuid not in excluded_ids
+            b_in = b_uuid in product_scores and b_uuid not in excluded_ids
+
+            if a_in and b_in:
+                # Remove the lower-scored product
+                if product_scores.get(a_uuid, 0) >= product_scores.get(b_uuid, 0):
+                    remove_id, remove_uuid = b_id, b_uuid
+                else:
+                    remove_id, remove_uuid = a_id, a_uuid
+
                 excluded.append({
-                    "product_id": b_id,
+                    "product_id": remove_id,
                     "reason": f"Conflict rule: {rule.config.get('reason', 'Conflicting products')}",
                     "rule_id": str(rule.id),
                 })
-                excluded_ids.add(b_id)
+                excluded_ids.add(remove_uuid)
 
-    # 6. Final matched list (excluding excluded products)
+    # Step 9: Build final ranked list (exclude removed, sort by score, limit to top_n)
+    product_map = {p.id: p for p in skin_matched}
     final = [
-        (p, score) for p, score in scored
-        if str(p.id) not in excluded_ids
+        (product_map[pid], score)
+        for pid, score in product_scores.items()
+        if pid not in excluded_ids and pid in product_map
     ]
     final.sort(key=lambda x: x[1], reverse=True)
+    final = final[:top_n]
+
+    if not final:
+        return _fallback_response(skin_type, concerns, preferences, "all_excluded",
+                                  "All matching products were excluded by rules. Consider reviewing your recommendation rules.")
 
     return {
         "input": {
@@ -192,8 +254,10 @@ async def test_rules(
             "concerns": [c.value for c in concerns],
             "preferences": preferences,
         },
+        "fallback": None,
         "total_products": len(all_products),
         "skin_type_matched": len(skin_matched),
+        "top_n": top_n,
         "matched_products": [
             {
                 "product_id": str(p.id),
@@ -208,6 +272,25 @@ async def test_rules(
         ],
         "excluded_products": excluded,
         "rules_applied": len(rules),
+    }
+
+
+def _fallback_response(
+    skin_type: SkinType, concerns: list, preferences: list, fallback_type: str, message: str
+) -> dict:
+    return {
+        "input": {
+            "skin_type": skin_type.value,
+            "concerns": [c.value for c in concerns],
+            "preferences": preferences,
+        },
+        "fallback": {"type": fallback_type, "message": message},
+        "total_products": 0,
+        "skin_type_matched": 0,
+        "top_n": 0,
+        "matched_products": [],
+        "excluded_products": [],
+        "rules_applied": 0,
     }
 
 

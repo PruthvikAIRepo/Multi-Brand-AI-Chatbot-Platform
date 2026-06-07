@@ -52,10 +52,13 @@ async def list_routines(
     skin_type: SkinType | None = None,
     active_only: bool = True,
     include_deleted: bool = False,
+    deleted_only: bool = False,
 ) -> tuple[list[dict], int]:
     base_filter = [Routine.brand_id == brand_id]
 
-    if not include_deleted:
+    if deleted_only:
+        base_filter.append(Routine.deleted_at.is_not(None))
+    elif not include_deleted:
         base_filter.append(Routine.deleted_at.is_(None))
     if active_only and not include_deleted:
         base_filter.append(Routine.is_active == True)

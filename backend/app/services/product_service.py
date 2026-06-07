@@ -62,13 +62,16 @@ async def list_products(
     in_stock: bool | None = None,
     search: str | None = None,
     include_deleted: bool = False,
+    deleted_only: bool = False,
     embedding_status: EmbeddingStatus | None = None,
 ) -> tuple[list[dict], int]:
     """List products for a brand with filters and pagination."""
     # Base filter
     base_filter = [Product.brand_id == brand_id]
 
-    if not include_deleted:
+    if deleted_only:
+        base_filter.append(Product.deleted_at.is_not(None))
+    elif not include_deleted:
         base_filter.append(Product.deleted_at.is_(None))
 
     if category:
