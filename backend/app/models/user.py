@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Enum, ForeignKey, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db.base import Base, UUIDMixin, TimestampMixin
 from app.models.enums import UserRole
@@ -29,6 +29,7 @@ class UserBrandAssignment(Base, UUIDMixin):
 
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     brand_id = Column(UUID(as_uuid=True), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True)
+    permissions = Column(JSONB, server_default=text("'[]'::jsonb"))  # List of permission strings
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     __table_args__ = (UniqueConstraint("user_id", "brand_id"),)

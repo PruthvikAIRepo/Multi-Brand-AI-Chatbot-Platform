@@ -17,24 +17,17 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class UserListResponse(BaseModel):
-    id: UUID
-    email: str
-    full_name: str | None
-    role: UserRole
-    is_active: bool
-    last_login: datetime | None
-    assigned_brands: list[dict] = []
-
-    model_config = {"from_attributes": True}
-
-
 class InviteUserRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=1, max_length=255)
     role: UserRole = UserRole.ADMIN
     brand_ids: list[UUID] = []
+    permissions: list[str] | None = None  # None = all permissions (default)
 
 
 class UpdateUserBrandsRequest(BaseModel):
     brand_ids: list[UUID]
+
+
+class UpdateUserPermissionsRequest(BaseModel):
+    permissions: list[str]

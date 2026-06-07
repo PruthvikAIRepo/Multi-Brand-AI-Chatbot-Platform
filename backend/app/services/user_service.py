@@ -9,6 +9,7 @@ from app.models.brand import Brand
 from app.models.enums import UserRole
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundError, AlreadyExistsError, BadRequestError
+from app.core.permissions import ALL_BRAND_PERMISSIONS
 
 
 def _generate_temp_password(length: int = 12) -> str:
@@ -64,9 +65,13 @@ async def invite_user(
     db.add(user)
     await db.flush()
 
-    # Assign brands
+    # Assign brands with full permissions by default
     for brand_id in brand_ids:
-        db.add(UserBrandAssignment(user_id=user.id, brand_id=brand_id))
+        db.add(UserBrandAssignment(
+            user_id=user.id,
+            brand_id=brand_id,
+            permissions=ALL_BRAND_PERMISSIONS,
+        ))
 
     await db.flush()
 
@@ -107,7 +112,11 @@ async def list_users(db: AsyncSession, page: int = 1, per_page: int = 20) -> tup
             "last_login": u.last_login.isoformat() if u.last_login else None,
             "created_at": u.created_at.isoformat(),
             "assigned_brands": [
-                {"id": str(a.brand_id), "name": a.brand.name}
+                {
+                    "id": str(a.brand_id),
+                    "name": a.brand.name,
+                    "permissions": a.permissions or [],
+                }
                 for a in u.brand_assignments
             ],
         }
@@ -118,7 +127,7 @@ async def list_users(db: AsyncSession, page: int = 1, per_page: int = 20) -> tup
 
 
 async def get_user(db: AsyncSession, user_id: UUID) -> dict:
-    """Get a single user with brand assignments."""
+    """Get a single user with brand assignments and permissions."""
     result = await db.execute(
         select(User)
         .options(selectinload(User.brand_assignments).selectinload(UserBrandAssignment.brand))
@@ -138,7 +147,11 @@ async def get_user(db: AsyncSession, user_id: UUID) -> dict:
         "last_login": user.last_login.isoformat() if user.last_login else None,
         "created_at": user.created_at.isoformat(),
         "assigned_brands": [
-            {"id": str(a.brand_id), "name": a.brand.name}
+            {
+                "id": str(a.brand_id),
+                "name": a.brand.name,
+                "permissions": a.permissions or [],
+            }
             for a in user.brand_assignments
         ],
     }
@@ -174,9 +187,13 @@ async def update_user_brands(db: AsyncSession, user_id: UUID, brand_ids: list[UU
     for assignment in result.scalars().all():
         await db.delete(assignment)
 
-    # Add new assignments
+    # Add new assignments with full permissions by default
     for brand_id in brand_ids:
-        db.add(UserBrandAssignment(user_id=user_id, brand_id=brand_id))
+        db.add(UserBrandAssignment(
+            user_id=user_id,
+            brand_id=brand_id,
+            permissions=ALL_BRAND_PERMISSIONS,
+        ))
 
     await db.flush()
 
@@ -208,6 +225,35 @@ async def deactivate_user(db: AsyncSession, user_id: UUID, current_user_id: UUID
     await db.flush()
 
     return {"id": str(user.id), "email": user.email, "is_active": False}
+
+
+async def update_user_permissions(
+    db: AsyncSession, user_id: UUID, brand_id: UUID, permissions: list[str]
+) -> dict:
+    """Update permissions for a user on a specific brand. Super Admin only."""
+    # Validate permissions are real
+    invalid = [p for p in permissions if p not in ALL_BRAND_PERMISSIONS]
+    if invalid:
+        raise BadRequestError(f"Invalid permissions: {', '.join(invalid)}")
+
+    result = await db.execute(
+        select(UserBrandAssignment).where(
+            UserBrandAssignment.user_id == user_id,
+            UserBrandAssignment.brand_id == brand_id,
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    if not assignment:
+        raise NotFoundError("User brand assignment")
+
+    assignment.permissions = permissions
+    await db.flush()
+
+    return {
+        "user_id": str(user_id),
+        "brand_id": str(brand_id),
+        "permissions": permissions,
+    }
 
 
 async def activate_user(db: AsyncSession, user_id: UUID) -> dict:

@@ -1,8 +1,8 @@
-"""initial_schema_35_tables_v2
+"""initial_schema_with_permissions
 
-Revision ID: 742ffa828434
+Revision ID: 7c8ed624ae89
 Revises: 
-Create Date: 2026-06-06 21:26:21.255783
+Create Date: 2026-06-07 13:22:34.330506
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 import pgvector.sqlalchemy
 
 # revision identifiers, used by Alembic.
-revision: str = '742ffa828434'
+revision: str = '7c8ed624ae89'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -433,6 +433,7 @@ def upgrade() -> None:
     op.create_table('user_brand_assignments',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('brand_id', sa.UUID(), nullable=False),
+    sa.Column('permissions', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ondelete='CASCADE'),

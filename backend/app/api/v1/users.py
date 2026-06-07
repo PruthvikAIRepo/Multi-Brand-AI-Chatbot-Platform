@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest
+from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest, UpdateUserPermissionsRequest
 from app.services import user_service
 from app.core.permissions import require_super_admin
 from app.core.response import api_response, paginated_response
@@ -57,6 +57,28 @@ async def update_user_brands(
     """Update brand assignments for a user. Super Admin only."""
     user = await user_service.update_user_brands(db, user_id, request.brand_ids)
     return api_response(data=user, message="Brand assignments updated")
+
+
+@router.put("/{user_id}/brands/{brand_id}/permissions", response_model=dict)
+async def update_user_permissions(
+    user_id: UUID,
+    brand_id: UUID,
+    request: UpdateUserPermissionsRequest,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update permissions for a user on a specific brand. Super Admin only."""
+    result = await user_service.update_user_permissions(db, user_id, brand_id, request.permissions)
+    return api_response(data=result, message="Permissions updated")
+
+
+@router.get("/permissions/all", response_model=dict)
+async def list_all_permissions(
+    current_user: User = Depends(require_super_admin),
+):
+    """List all available permissions. Useful for the UI to show checkboxes."""
+    from app.core.permissions import ALL_BRAND_PERMISSIONS
+    return api_response(data=ALL_BRAND_PERMISSIONS)
 
 
 @router.post("/{user_id}/deactivate", response_model=dict)

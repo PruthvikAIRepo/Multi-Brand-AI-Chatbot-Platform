@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.brand import BrandCreateRequest, BrandUpdateRequest
 from app.services import brand_service
-from app.core.permissions import get_current_user, require_super_admin, require_brand_access
+from app.core.permissions import get_current_user, require_super_admin, check_brand_permission
 from app.core.response import api_response, paginated_response
 from app.models.user import User
 
@@ -37,10 +37,11 @@ async def list_brands(
 @router.get("/{brand_id}", response_model=dict)
 async def get_brand(
     brand_id: UUID,
-    current_user: User = Depends(require_brand_access),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get brand details with all configs. Requires brand access."""
+    """Get brand details with all configs. Requires brand.view permission."""
+    await check_brand_permission(db, current_user, brand_id, "brand.view")
     brand = await brand_service.get_brand(db, brand_id)
     return api_response(data=brand)
 
@@ -49,10 +50,11 @@ async def get_brand(
 async def update_brand(
     brand_id: UUID,
     request: BrandUpdateRequest,
-    current_user: User = Depends(require_brand_access),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update brand details. Requires brand access."""
+    """Update brand details. Requires brand.edit permission."""
+    await check_brand_permission(db, current_user, brand_id, "brand.edit")
     brand = await brand_service.update_brand(
         db, brand_id, request.model_dump(exclude_unset=True)
     )
