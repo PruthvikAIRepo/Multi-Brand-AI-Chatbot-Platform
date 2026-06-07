@@ -71,6 +71,7 @@ async def update_user_brands(
 ):
     """Update brand assignments for a user. Super Admin only."""
     user = await user_service.update_user_brands(db, user_id, request.brand_ids)
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "user_brands", entity_id=user_id, after_state={"brand_ids": [str(b) for b in request.brand_ids]})
     return api_response(data=user, message="Brand assignments updated")
 
 
@@ -84,6 +85,7 @@ async def update_user_permissions(
 ):
     """Update permissions for a user on a specific brand. Super Admin only."""
     result = await user_service.update_user_permissions(db, user_id, brand_id, request.permissions)
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "user_permissions", entity_id=user_id, brand_id=brand_id, after_state={"permissions": request.permissions})
     return api_response(data=result, message="Permissions updated")
 
 
@@ -107,4 +109,5 @@ async def activate_user(
 ):
     """Reactivate a deactivated user. Super Admin only."""
     result = await user_service.activate_user(db, user_id)
+    await audit_service.log_action(db, current_user.id, AdminActionType.ENABLED, "user", entity_id=user_id)
     return api_response(data=result, message="User activated")

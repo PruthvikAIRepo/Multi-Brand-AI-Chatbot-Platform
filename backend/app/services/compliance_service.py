@@ -95,8 +95,14 @@ async def check_response(db: AsyncSession, brand_id: UUID, response_text: str) -
 
 
 def _is_whitelisted(text: str, allowed_phrases: list[str]) -> bool:
-    """Check if a flagged text is covered by an allowed_phrase whitelist entry."""
+    """Check if flagged text is whitelisted. Only exact match or flagged text is substring of allowed."""
     for allowed in allowed_phrases:
-        if allowed in text or text in allowed:
+        if text == allowed:
             return True
+    return False
+
+
+# Note: conversation_boundary rules are enforced via the system prompt (tone_service),
+# not via post-response filtering. The AI is instructed to follow boundaries,
+# and violations would need NLP analysis to detect (beyond simple pattern matching).
     return False

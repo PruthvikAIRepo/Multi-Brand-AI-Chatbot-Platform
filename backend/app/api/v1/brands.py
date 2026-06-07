@@ -24,8 +24,10 @@ async def create_brand(
 ):
     """Create a new brand with default configs. Super Admin only."""
     brand = await brand_service.create_brand(db, request.model_dump())
+    from uuid import UUID as _UUID
     await audit_service.log_action(
         db, current_user.id, AdminActionType.CREATED, "brand",
+        entity_id=_UUID(brand["id"]), brand_id=_UUID(brand["id"]),
         entity_name=brand["name"], after_state=brand,
     )
     return api_response(data=brand, message="Brand created successfully")
@@ -67,6 +69,7 @@ async def update_brand(
     brand = await brand_service.update_brand(
         db, brand_id, request.model_dump(exclude_unset=True)
     )
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "brand", entity_id=brand_id, brand_id=brand_id, entity_name=brand.get("name"), after_state=request.model_dump(exclude_unset=True))
     return api_response(data=brand, message="Brand updated successfully")
 
 
@@ -98,6 +101,7 @@ async def update_brand_config(
     """Update brand config (response settings, messages, lead capture, rate limits). Requires brand.config.edit."""
     await check_brand_permission(db, current_user, brand_id, "brand.config.edit")
     config = await brand_service.update_brand_config(db, brand_id, request.model_dump(exclude_unset=True))
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "brand_config", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
     return api_response(data=config, message="Brand config updated")
 
 
@@ -111,6 +115,7 @@ async def update_tone_settings(
     """Update tone & personality settings. Requires tone.edit."""
     await check_brand_permission(db, current_user, brand_id, "tone.edit")
     tone = await brand_service.update_tone_settings(db, brand_id, request.model_dump(exclude_unset=True))
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "tone_settings", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
     return api_response(data=tone, message="Tone settings updated")
 
 
@@ -124,6 +129,7 @@ async def update_moderation_config(
     """Update moderation config (sensitivity, allow/block lists). Requires moderation.edit."""
     await check_brand_permission(db, current_user, brand_id, "moderation.edit")
     mod = await brand_service.update_moderation_config(db, brand_id, request.model_dump(exclude_unset=True))
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "moderation_config", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
     return api_response(data=mod, message="Moderation config updated")
 
 
@@ -137,6 +143,7 @@ async def update_image_styles(
     """Update image style rules (card styling, UI elements). Requires image_styles.edit."""
     await check_brand_permission(db, current_user, brand_id, "image_styles.edit")
     styles = await brand_service.update_image_styles(db, brand_id, request.model_dump(exclude_unset=True))
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "image_styles", brand_id=brand_id, after_state=request.model_dump(exclude_unset=True))
     return api_response(data=styles, message="Image styles updated")
 
 
@@ -150,4 +157,5 @@ async def update_chatbot_status(
     """Change chatbot status: normal / safe_mode / disabled. Requires emergency.override."""
     await check_brand_permission(db, current_user, brand_id, "emergency.override")
     result = await brand_service.update_chatbot_status(db, brand_id, request.status)
+    await audit_service.log_action(db, current_user.id, AdminActionType.OVERRIDDEN, "chatbot_status", brand_id=brand_id, after_state={"status": request.status.value})
     return api_response(data=result, message=f"Chatbot status changed to {request.status.value}")

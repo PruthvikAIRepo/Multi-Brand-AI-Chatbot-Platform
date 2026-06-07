@@ -94,6 +94,7 @@ async def update_product(
     product = await product_service.update_product(
         db, brand_id, product_id, request.model_dump(exclude_unset=True)
     )
+    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "product", entity_id=product_id, brand_id=brand_id, entity_name=product.get("name"), after_state=request.model_dump(exclude_unset=True))
     return api_response(data=product, message="Product updated successfully")
 
 
@@ -124,4 +125,5 @@ async def restore_product(
     """Restore a soft-deleted product. Re-triggers embedding. Requires products.edit permission."""
     await check_brand_permission(db, current_user, brand_id, "products.edit")
     product = await product_service.restore_product(db, brand_id, product_id)
+    await audit_service.log_action(db, current_user.id, AdminActionType.RESTORED, "product", entity_id=product_id, brand_id=brand_id, entity_name=product.get("name"))
     return api_response(data=product, message="Product restored successfully")
