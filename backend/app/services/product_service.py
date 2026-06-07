@@ -1,13 +1,17 @@
 from uuid import UUID
 from datetime import datetime, timezone
-from decimal import Decimal
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.product import Product, ProductSkinType, ProductConcern
-from app.models.embedding import EmbeddingSyncStatus
+from app.models.embedding import EmbeddingSyncStatus, Embedding
 from app.models.enums import SkinType, SkinConcern, EntityType, EmbeddingStatus
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, BadRequestError
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE wildcards in search input."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 async def create_product(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
@@ -27,11 +31,11 @@ async def create_product(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
     db.add(product)
     await db.flush()
 
-    # Add skin types
+    # Add skin types (deduplicated)
     for st in set(data.get("skin_types", [])):
         db.add(ProductSkinType(product_id=product.id, skin_type=st))
 
-    # Add concerns
+    # Add concerns (deduplicated)
     for concern in set(data.get("concerns", [])):
         db.add(ProductConcern(product_id=product.id, concern=concern))
 
@@ -44,7 +48,6 @@ async def create_product(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
     ))
 
     await db.flush()
-
     return await _load_product_response(db, product.id)
 
 
@@ -58,68 +61,58 @@ async def list_products(
     concern: SkinConcern | None = None,
     in_stock: bool | None = None,
     search: str | None = None,
+    include_deleted: bool = False,
 ) -> tuple[list[dict], int]:
-    """List products for a brand with filters and pagination. Excludes soft-deleted."""
-    # Base query — only non-deleted products for this brand
-    base_filter = [
-        Product.brand_id == brand_id,
-        Product.deleted_at.is_(None),
-    ]
+    """List products for a brand with filters and pagination."""
+    # Base filter
+    base_filter = [Product.brand_id == brand_id]
+
+    if not include_deleted:
+        base_filter.append(Product.deleted_at.is_(None))
 
     if category:
         base_filter.append(Product.category == category)
     if in_stock is not None:
         base_filter.append(Product.is_in_stock == in_stock)
     if search:
-        base_filter.append(Product.name.ilike(f"%{search}%"))
+        safe_search = _escape_like(search)
+        base_filter.append(Product.name.ilike(f"%{safe_search}%"))
 
-    # Count total
-    count_query = select(func.count()).select_from(Product).where(*base_filter)
-
-    # Apply skin_type / concern filters via subqueries
+    # Skin type / concern subquery filters
+    extra_filters = []
     if skin_type:
-        count_query = count_query.where(
+        extra_filters.append(
             Product.id.in_(
                 select(ProductSkinType.product_id).where(ProductSkinType.skin_type == skin_type)
             )
         )
     if concern:
-        count_query = count_query.where(
+        extra_filters.append(
             Product.id.in_(
                 select(ProductConcern.product_id).where(ProductConcern.concern == concern)
             )
         )
 
-    count_result = await db.execute(count_query)
+    all_filters = base_filter + extra_filters
+
+    # Count
+    count_result = await db.execute(
+        select(func.count()).select_from(Product).where(*all_filters)
+    )
     total = count_result.scalar()
 
-    # Fetch products
-    query = (
+    # Fetch
+    result = await db.execute(
         select(Product)
         .options(selectinload(Product.skin_types), selectinload(Product.concerns))
-        .where(*base_filter)
+        .where(*all_filters)
         .order_by(Product.created_at.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
     )
-
-    if skin_type:
-        query = query.where(
-            Product.id.in_(
-                select(ProductSkinType.product_id).where(ProductSkinType.skin_type == skin_type)
-            )
-        )
-    if concern:
-        query = query.where(
-            Product.id.in_(
-                select(ProductConcern.product_id).where(ProductConcern.concern == concern)
-            )
-        )
-
-    result = await db.execute(query)
     products = result.scalars().unique().all()
 
-    # Get embedding statuses in one query
+    # Batch fetch embedding statuses
     product_ids = [p.id for p in products]
     embed_statuses = await _get_embedding_statuses(db, product_ids)
 
@@ -164,7 +157,6 @@ async def update_product(db: AsyncSession, brand_id: UUID, product_id: UUID, dat
     # Track if text content changes (needs re-embedding)
     text_changed = False
 
-    # Update scalar fields
     for field in ["name", "description", "ingredients", "price", "image_url", "category", "purchase_url", "is_in_stock", "priority_score"]:
         if field in data:
             if field in ("name", "description", "ingredients") and getattr(product, field) != data[field]:
@@ -173,10 +165,8 @@ async def update_product(db: AsyncSession, brand_id: UUID, product_id: UUID, dat
 
     # Update skin types if provided
     if "skin_types" in data:
-        # Remove existing
         for st in product.skin_types:
             await db.delete(st)
-        # Add new
         for st in set(data["skin_types"]):
             db.add(ProductSkinType(product_id=product.id, skin_type=st))
 
@@ -192,12 +182,11 @@ async def update_product(db: AsyncSession, brand_id: UUID, product_id: UUID, dat
         await _update_embedding_status(db, brand_id, product.id, EmbeddingStatus.PENDING)
 
     await db.flush()
-
     return await _load_product_response(db, product.id)
 
 
 async def delete_product(db: AsyncSession, brand_id: UUID, product_id: UUID) -> None:
-    """Soft delete a product. Sets deleted_at timestamp."""
+    """Soft delete a product. Removes embeddings so it stops appearing in RAG search."""
     result = await db.execute(
         select(Product).where(
             Product.id == product_id,
@@ -211,23 +200,63 @@ async def delete_product(db: AsyncSession, brand_id: UUID, product_id: UUID) -> 
 
     product.deleted_at = datetime.now(timezone.utc)
 
-    # Remove embedding sync status and embeddings for this product
-    embed_result = await db.execute(
+    # Remove embedding sync status
+    embed_status_result = await db.execute(
         select(EmbeddingSyncStatus).where(
+            EmbeddingSyncStatus.brand_id == brand_id,
             EmbeddingSyncStatus.entity_type == EntityType.PRODUCT,
             EmbeddingSyncStatus.entity_id == product_id,
         )
     )
-    for status in embed_result.scalars().all():
+    for status in embed_status_result.scalars().all():
         await db.delete(status)
 
+    # Remove actual vector embeddings so deleted product is NOT returned by RAG search
+    embed_result = await db.execute(
+        select(Embedding).where(
+            Embedding.brand_id == brand_id,
+            Embedding.entity_type == EntityType.PRODUCT,
+            Embedding.entity_id == product_id,
+        )
+    )
+    for emb in embed_result.scalars().all():
+        await db.delete(emb)
+
     await db.flush()
+
+
+async def restore_product(db: AsyncSession, brand_id: UUID, product_id: UUID) -> dict:
+    """Restore a soft-deleted product. Re-triggers embedding."""
+    result = await db.execute(
+        select(Product)
+        .options(selectinload(Product.skin_types), selectinload(Product.concerns))
+        .where(
+            Product.id == product_id,
+            Product.brand_id == brand_id,
+            Product.deleted_at.is_not(None),
+        )
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise NotFoundError("Deleted product", str(product_id))
+
+    product.deleted_at = None
+
+    # Re-trigger embedding
+    db.add(EmbeddingSyncStatus(
+        brand_id=brand_id,
+        entity_type=EntityType.PRODUCT,
+        entity_id=product.id,
+        status=EmbeddingStatus.PENDING,
+    ))
+
+    await db.flush()
+    return await _load_product_response(db, product.id)
 
 
 # --- Helpers ---
 
 async def _load_product_response(db: AsyncSession, product_id: UUID) -> dict:
-    """Load a product with all relationships for response."""
     result = await db.execute(
         select(Product)
         .options(selectinload(Product.skin_types), selectinload(Product.concerns))
@@ -239,7 +268,6 @@ async def _load_product_response(db: AsyncSession, product_id: UUID) -> dict:
 
 
 async def _get_embedding_statuses(db: AsyncSession, product_ids: list[UUID]) -> dict[UUID, str]:
-    """Get embedding statuses for multiple products in one query."""
     if not product_ids:
         return {}
     result = await db.execute(
@@ -254,9 +282,9 @@ async def _get_embedding_statuses(db: AsyncSession, product_ids: list[UUID]) -> 
 async def _update_embedding_status(
     db: AsyncSession, brand_id: UUID, product_id: UUID, status: EmbeddingStatus
 ) -> None:
-    """Update or create embedding sync status for a product."""
     result = await db.execute(
         select(EmbeddingSyncStatus).where(
+            EmbeddingSyncStatus.brand_id == brand_id,
             EmbeddingSyncStatus.entity_type == EntityType.PRODUCT,
             EmbeddingSyncStatus.entity_id == product_id,
         )
@@ -290,6 +318,7 @@ def _product_to_dict(product: Product, embedding_status: str | None = None) -> d
         "skin_types": [st.skin_type.value for st in product.skin_types],
         "concerns": [c.concern.value for c in product.concerns],
         "embedding_status": embedding_status,
+        "is_deleted": product.deleted_at is not None,
         "created_at": product.created_at.isoformat(),
         "updated_at": product.updated_at.isoformat(),
     }

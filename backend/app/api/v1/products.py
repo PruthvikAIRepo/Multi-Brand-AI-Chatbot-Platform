@@ -38,12 +38,30 @@ async def list_products(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List products for a brand with filters. Requires products.view permission."""
+    """List active products for a brand with filters. Requires products.view permission."""
     await check_brand_permission(db, current_user, brand_id, "products.view")
     products, total = await product_service.list_products(
         db, brand_id, page, per_page, category, skin_type, concern, in_stock, search
     )
     return paginated_response(data=products, total=total, page=page, per_page=per_page)
+
+
+@router.get("/deleted", response_model=dict)
+async def list_deleted_products(
+    brand_id: UUID,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List soft-deleted products for review/restore. Requires products.edit permission."""
+    await check_brand_permission(db, current_user, brand_id, "products.edit")
+    products, total = await product_service.list_products(
+        db, brand_id, page, per_page, include_deleted=True
+    )
+    # Filter to only deleted ones
+    deleted = [p for p in products if p.get("is_deleted")]
+    return paginated_response(data=deleted, total=len(deleted), page=page, per_page=per_page)
 
 
 @router.get("/{product_id}", response_model=dict)
@@ -82,7 +100,20 @@ async def delete_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft delete a product. Removes from recommendations immediately. Requires products.edit permission."""
+    """Soft delete a product. Removes from RAG search immediately. Requires products.edit permission."""
     await check_brand_permission(db, current_user, brand_id, "products.edit")
     await product_service.delete_product(db, brand_id, product_id)
     return api_response(message="Product deleted successfully")
+
+
+@router.post("/{product_id}/restore", response_model=dict)
+async def restore_product(
+    brand_id: UUID,
+    product_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore a soft-deleted product. Re-triggers embedding. Requires products.edit permission."""
+    await check_brand_permission(db, current_user, brand_id, "products.edit")
+    product = await product_service.restore_product(db, brand_id, product_id)
+    return api_response(data=product, message="Product restored successfully")
