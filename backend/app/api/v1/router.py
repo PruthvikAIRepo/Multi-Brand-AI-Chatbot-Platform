@@ -1,5 +1,9 @@
 from fastapi import APIRouter
-from app.api.v1 import health, auth, users, brands, products, faqs, routines, compliance_rules, recommendation_rules, prompts, conversations, logs
+from app.api.v1 import (
+    health, auth, users, brands, products, faqs, routines,
+    compliance_rules, recommendation_rules, prompts,
+    conversations, logs, leads, embedding_status,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -38,3 +42,9 @@ api_router.include_router(conversations.router)
 
 # Logs (system-wide + brand-scoped)
 api_router.include_router(logs.router)
+
+# Leads (brand-scoped, encrypted PII)
+api_router.include_router(leads.router)
+
+# Embedding Status (brand-scoped)
+api_router.include_router(embedding_status.router)
