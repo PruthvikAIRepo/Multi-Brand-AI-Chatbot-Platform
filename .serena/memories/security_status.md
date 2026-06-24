@@ -24,13 +24,17 @@ From the foundation review (2026-06). GitHub issues #3–#14 (labels `bug`,`secu
 - `invite_user` lowercases email (consistency with login; prevents mixed-case lockout).
 - Frontend hand-off doc: `docs/AUTH_API.md`.
 
+### Unit 3 (at-rest encryption) — DONE on branch feature/encryption-hardening
+- **#7 fixed** — `core/encryption.py` now AES-256-GCM (authenticated) + HKDF-SHA256 key
+  derivation + multi-key rotation (`ENCRYPTION_KEYS_RETIRED`), with legacy-CBC fallback so
+  old data still decrypts. Public API unchanged. Details + rotation steps in `mem:encryption`.
+  Covered by `backend/tests/test_encryption.py` (8 tests).
+
 ## OPEN — still to do
 - **#4 CRITICAL** — Meta webhook signature verification is bypassed when `META_APP_SECRET`
   empty (default), no env gate. (Phase 2 channel; fix before enabling webhooks.)
 - **#6 CRITICAL** — embeddings are NOT dispatched to Celery; they run inline in the request.
   Tasks in `app/tasks/embedding_tasks.py` are dead code (never `.delay()`'d).
-- **#7 HIGH** — AES-CBC with no auth tag, unsalted SHA-256 key derivation, no key rotation.
-  Move to Fernet/AES-GCM + versioned key.
 - **#10 HIGH** — upload stored-XSS: client-trusted content-type, SVG allowed, public S3 URLs.
 - **#11 HIGH** — webhooks not idempotent (Meta retries → duplicate replies); batches dropped.
 - **#12 HIGH** — "instant override" broken: prompt publish/restore + compliance-rule edits
