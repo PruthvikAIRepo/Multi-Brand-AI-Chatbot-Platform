@@ -46,6 +46,10 @@ class Settings(BaseSettings):
 
     # Encryption key for AES-256 (secrets, lead PII)
     ENCRYPTION_KEY: str = "change-this-32-byte-key-in-prod!"
+    # Comma-separated retired keys, kept ONLY so data encrypted under them can
+    # still be decrypted during a key rotation. New data is always encrypted
+    # with ENCRYPTION_KEY (the primary). Drop a retired key once nothing uses it.
+    ENCRYPTION_KEYS_RETIRED: str = ""
 
     # Meta (WhatsApp + Instagram)
     META_WEBHOOK_VERIFY_TOKEN: str = "chatbot_webhook_verify_2026"

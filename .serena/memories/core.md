@@ -23,6 +23,7 @@ leak. (Verified: the content-CRUD layer does this correctly via `(id, brand_id)`
 - `mem:tech_stack` — stack, how to run, how to test.
 - `mem:architecture_backend` — backend layout and how requests flow.
 - `mem:auth_and_rbac` — Super Admin / Admin model, permissions, login flow (current).
+- `mem:encryption` — at-rest encryption (AES-256-GCM) + key rotation + secret handling.
 - `mem:conventions` — coding/testing/deploy conventions.
 - `mem:security_status` — open security issues (#3–#14) and what's fixed.
 - `mem:memory_maintenance` — how to keep these memories healthy.
@@ -30,8 +31,7 @@ leak. (Verified: the content-CRUD layer does this correctly via `(id, brand_id)`
 ## Current build state (2026-06-25)
 Foundation review complete. We are working **foundation-first, in user-journey order**,
 starting with Super Admin/Admin auth so endpoints can be handed to the frontend dev.
-**Unit 1 (login hardening) + Unit 2 (user-mgmt audit + unlock + hand-off doc) are DONE** —
-see `mem:security_status`. Frontend reference: `docs/AUTH_API.md`. The Super-Admin/Admin auth
-+ user-management surface is now ready to hand to the frontend dev. Nothing committed yet.
-Next candidates: commit/branch this work, then either Unit 3 (the remaining OPEN issues in
-`mem:security_status`, e.g. crypto #7 / Celery #6) or move forward in the journey.
+**Unit 1 (login hardening) + Unit 2 (user-mgmt audit + unlock + hand-off doc)** are merged to
+`main` (PR #15). Frontend reference: `docs/AUTH_API.md`. **Unit 3 (at-rest encryption, #7)** is
+implemented on `feature/encryption-hardening` (see `mem:encryption`). See `mem:security_status`
+for what's done vs the remaining OPEN issues (#4, #6, #10–#14).
