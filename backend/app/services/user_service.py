@@ -30,6 +30,10 @@ async def invite_user(
     if role == UserRole.SUPER_ADMIN:
         raise BadRequestError("Cannot invite Super Admin users. Only one Super Admin exists (seed account).")
 
+    # Normalize email to lowercase so it matches login (which lowercases),
+    # and so the unique constraint is effectively case-insensitive.
+    email = (email or "").strip().lower()
+
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
@@ -214,6 +218,7 @@ async def deactivate_user(db: AsyncSession, user_id: UUID, current_user_id: UUID
     if not user:
         raise NotFoundError("User", str(user_id))
 
+    was_active = user.is_active
     user.is_active = False
 
     # Revoke all refresh tokens so they can't get new access tokens
@@ -228,7 +233,7 @@ async def deactivate_user(db: AsyncSession, user_id: UUID, current_user_id: UUID
 
     await db.flush()
 
-    return {"id": str(user.id), "email": user.email, "is_active": False}
+    return {"id": str(user.id), "email": user.email, "is_active": False, "before_is_active": was_active}
 
 
 async def update_user_permissions(
@@ -261,15 +266,32 @@ async def update_user_permissions(
 
 
 async def activate_user(db: AsyncSession, user_id: UUID) -> dict:
-    """Reactivate a deactivated user."""
+    """Reactivate a deactivated user (also clears any lockout)."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise NotFoundError("User", str(user_id))
 
+    was_active = user.is_active
     user.is_active = True
     user.failed_login_attempts = 0
     user.locked_until = None
     await db.flush()
 
-    return {"id": str(user.id), "email": user.email, "is_active": True}
+    return {"id": str(user.id), "email": user.email, "is_active": True, "before_is_active": was_active}
+
+
+async def unlock_user(db: AsyncSession, user_id: UUID) -> dict:
+    """Clear a brute-force lockout (failed attempts + lock) without changing
+    the active flag. Super Admin only. Maps to the UI 'Unlock account' action."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundError("User", str(user_id))
+
+    was_locked = bool(user.locked_until) or (user.failed_login_attempts or 0) > 0
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    await db.flush()
+
+    return {"id": str(user.id), "email": user.email, "was_locked": was_locked}

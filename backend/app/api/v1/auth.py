@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
@@ -10,17 +10,23 @@ from app.schemas.auth import (
     ResetPasswordRequest,
 )
 from app.services import auth_service
-from app.core.permissions import get_current_user
+from app.core.permissions import get_current_user, get_authenticated_user
 from app.core.response import api_response
+from app.core.request_utils import get_client_ip
+from app.core.rate_limiter import check_auth_rate_limit
+from app.core.exceptions import RateLimitError
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/login", response_model=dict)
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(payload: LoginRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     """Authenticate user and return JWT tokens."""
-    result = await auth_service.authenticate_user(db, request.email, request.password)
+    ip = get_client_ip(http_request)
+    if await check_auth_rate_limit(ip):
+        raise RateLimitError()
+    result = await auth_service.authenticate_user(db, payload.email, payload.password, ip_address=ip)
     return api_response(data=result, message="Login successful")
 
 
@@ -34,10 +40,13 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
 @router.post("/change-password", response_model=dict)
 async def change_password(
     request: ChangePasswordRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change password for the currently authenticated user."""
+    """Change password for the currently authenticated user.
+
+    Uses the lenient dependency so a user still flagged must_change_password
+    can reach this endpoint to clear the gate."""
     await auth_service.change_password(
         db, current_user.id, request.current_password, request.new_password
     )
@@ -45,8 +54,10 @@ async def change_password(
 
 
 @router.post("/forgot-password", response_model=dict)
-async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+async def forgot_password(request: ForgotPasswordRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     """Request a password reset link. Always returns success to prevent email enumeration."""
+    if await check_auth_rate_limit(get_client_ip(http_request)):
+        raise RateLimitError()
     raw_token = await auth_service.forgot_password(db, request.email)
     # In production, send email with the raw_token link here
     # For development, we return the token so you can test
@@ -61,8 +72,10 @@ async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Dep
 
 
 @router.post("/reset-password", response_model=dict)
-async def reset_password(request: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+async def reset_password(request: ResetPasswordRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     """Reset password using a valid reset token."""
+    if await check_auth_rate_limit(get_client_ip(http_request)):
+        raise RateLimitError()
     await auth_service.reset_password(db, request.token, request.new_password)
     return api_response(message="Password reset successfully")
 
@@ -78,8 +91,11 @@ async def logout(
 
 
 @router.get("/me", response_model=dict)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """Get current authenticated user's info."""
+async def get_me(current_user: User = Depends(get_authenticated_user)):
+    """Get current authenticated user's info.
+
+    Lenient dependency so the frontend can read must_change_password and
+    redirect the user to the change-password screen."""
     return api_response(data={
         "id": str(current_user.id),
         "email": current_user.email,

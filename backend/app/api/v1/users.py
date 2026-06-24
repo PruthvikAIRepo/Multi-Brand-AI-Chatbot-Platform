@@ -1,10 +1,11 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest, UpdateUserPermissionsRequest
 from app.services import user_service, audit_service
 from app.core.permissions import require_super_admin
+from app.core.request_utils import get_client_ip
 from app.models.enums import AdminActionType
 from app.core.response import api_response, paginated_response
 from app.models.user import User
@@ -15,16 +16,19 @@ router = APIRouter(prefix="/users", tags=["User Management"])
 @router.post("", response_model=dict)
 async def invite_user(
     request: InviteUserRequest,
+    http_request: Request,
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Invite a new admin user. Super Admin only."""
+    """Invite a new admin user and assign brand(s). Super Admin only."""
     result = await user_service.invite_user(
         db, request.email, request.full_name, request.role, request.brand_ids
     )
     await audit_service.log_action(
         db, current_user.id, AdminActionType.INVITED, "user",
-        entity_name=result["email"], after_state={"role": result["role"], "brands": result["assigned_brand_ids"]},
+        entity_id=UUID(result["id"]), entity_name=result["email"],
+        ip_address=get_client_ip(http_request),
+        after_state={"role": result["role"], "brands": result["assigned_brand_ids"]},
     )
     return api_response(data=result, message="User invited successfully")
 
@@ -66,12 +70,20 @@ async def get_user(
 async def update_user_brands(
     user_id: UUID,
     request: UpdateUserBrandsRequest,
+    http_request: Request,
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Update brand assignments for a user. Super Admin only."""
+    before = await user_service.get_user(db, user_id)
+    before_ids = [b["id"] for b in before["assigned_brands"]]
     user = await user_service.update_user_brands(db, user_id, request.brand_ids)
-    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "user_brands", entity_id=user_id, after_state={"brand_ids": [str(b) for b in request.brand_ids]})
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "user_brands",
+        entity_id=user_id, ip_address=get_client_ip(http_request),
+        before_state={"brand_ids": before_ids},
+        after_state={"brand_ids": [str(b) for b in request.brand_ids]},
+    )
     return api_response(data=user, message="Brand assignments updated")
 
 
@@ -80,34 +92,73 @@ async def update_user_permissions(
     user_id: UUID,
     brand_id: UUID,
     request: UpdateUserPermissionsRequest,
+    http_request: Request,
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Update permissions for a user on a specific brand. Super Admin only."""
+    before = await user_service.get_user(db, user_id)
+    before_perms = next(
+        (b["permissions"] for b in before["assigned_brands"] if b["id"] == str(brand_id)), []
+    )
     result = await user_service.update_user_permissions(db, user_id, brand_id, request.permissions)
-    await audit_service.log_action(db, current_user.id, AdminActionType.UPDATED, "user_permissions", entity_id=user_id, brand_id=brand_id, after_state={"permissions": request.permissions})
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "user_permissions",
+        entity_id=user_id, brand_id=brand_id, ip_address=get_client_ip(http_request),
+        before_state={"permissions": before_perms},
+        after_state={"permissions": request.permissions},
+    )
     return api_response(data=result, message="Permissions updated")
 
 
 @router.post("/{user_id}/deactivate", response_model=dict)
 async def deactivate_user(
     user_id: UUID,
+    http_request: Request,
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a user and revoke all their tokens. Super Admin only."""
+    """Deactivate a user (revoke access) and revoke all their tokens. Super Admin only."""
     result = await user_service.deactivate_user(db, user_id, current_user.id)
-    await audit_service.log_action(db, current_user.id, AdminActionType.DISABLED, "user", entity_id=user_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DISABLED, "user",
+        entity_id=user_id, ip_address=get_client_ip(http_request),
+        before_state={"is_active": result["before_is_active"]},
+        after_state={"is_active": False},
+    )
     return api_response(data=result, message="User deactivated")
 
 
 @router.post("/{user_id}/activate", response_model=dict)
 async def activate_user(
     user_id: UUID,
+    http_request: Request,
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Reactivate a deactivated user. Super Admin only."""
     result = await user_service.activate_user(db, user_id)
-    await audit_service.log_action(db, current_user.id, AdminActionType.ENABLED, "user", entity_id=user_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.ENABLED, "user",
+        entity_id=user_id, ip_address=get_client_ip(http_request),
+        before_state={"is_active": result["before_is_active"]},
+        after_state={"is_active": True},
+    )
     return api_response(data=result, message="User activated")
+
+
+@router.post("/{user_id}/unlock", response_model=dict)
+async def unlock_user(
+    user_id: UUID,
+    http_request: Request,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear a brute-force lockout on a user account. Super Admin only."""
+    result = await user_service.unlock_user(db, user_id)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "user_unlock",
+        entity_id=user_id, ip_address=get_client_ip(http_request),
+        after_state={"was_locked": result["was_locked"], "unlocked": True},
+    )
+    return api_response(data=result, message="Account unlocked")

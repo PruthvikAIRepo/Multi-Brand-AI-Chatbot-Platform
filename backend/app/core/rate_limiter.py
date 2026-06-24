@@ -39,6 +39,27 @@ async def check_rate_limit(key: str, limit: int, window_seconds: int = 60) -> di
     }
 
 
+async def check_auth_rate_limit(ip_address: str | None) -> dict | None:
+    """Per-IP limit for auth endpoints (login/forgot/reset).
+
+    Fails OPEN: if Redis is unavailable we allow the request rather than locking
+    every user out of login. Returns None when allowed, or an info dict when the
+    limit is exceeded."""
+    if not ip_address:
+        return None
+    try:
+        check = await check_rate_limit(
+            f"auth:ip:{ip_address}",
+            settings.AUTH_RATE_LIMIT_PER_IP,
+            settings.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+        )
+    except Exception:
+        return None  # Redis down — do not block authentication
+    if not check["allowed"]:
+        return {"reset_in": check["reset_in"]}
+    return None
+
+
 async def check_chat_rate_limit(
     ip_address: str | None,
     session_id: str | None,
