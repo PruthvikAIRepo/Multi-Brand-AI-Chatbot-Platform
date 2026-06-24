@@ -11,6 +11,8 @@ from app.core.security import (
 )
 from app.core.exceptions import UnauthorizedError, BadRequestError, NotFoundError
 from app.config import get_settings
+from app.services import audit_service
+from app.models.enums import AdminActionType
 
 settings = get_settings()
 
@@ -18,9 +20,21 @@ settings = get_settings()
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 15
 
+# Pre-computed bcrypt hash used to equalize response time when the email does
+# not exist, so login timing can't be used to enumerate valid accounts.
+_DUMMY_PASSWORD_HASH = hash_password("timing-equalizer-not-a-real-account")
 
-async def authenticate_user(db: AsyncSession, email: str, password: str) -> dict:
-    """Login flow with brute-force protection."""
+
+async def authenticate_user(
+    db: AsyncSession, email: str, password: str, ip_address: str | None = None
+) -> dict:
+    """Login flow with brute-force protection and audit logging.
+
+    ip_address is recorded on the audit trail (SRS 21.3). Failed-attempt state
+    is committed before raising so account lockout actually persists (the
+    request's get_db dependency rolls back on the raised exception)."""
+    email = (email or "").strip().lower()
+
     # Find user
     result = await db.execute(
         select(User).where(User.email == email)
@@ -28,6 +42,9 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> dict
     user = result.scalar_one_or_none()
 
     if not user:
+        # Equalize timing against the password-verify path to prevent
+        # email enumeration; then fail with the same generic message.
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         raise UnauthorizedError("Invalid email or password")
 
     # Check if account is locked
@@ -41,17 +58,27 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> dict
 
     # Verify password
     if not verify_password(password, user.password_hash):
-        # Increment failed attempts
+        # Increment failed attempts and lock if threshold reached.
         user.failed_login_attempts += 1
-        if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+        locked = user.failed_login_attempts >= MAX_FAILED_ATTEMPTS
+        if locked:
             user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
-        await db.flush()
+        await audit_service.log_action(
+            db, user.id, AdminActionType.FAILED_LOGIN, "auth",
+            ip_address=ip_address,
+            after_state={"failed_login_attempts": user.failed_login_attempts, "locked": locked},
+        )
+        # Commit now so the counter/lock survive — get_db rolls back on raise.
+        await db.commit()
         raise UnauthorizedError("Invalid email or password")
 
     # Successful login — reset failed attempts
     user.failed_login_attempts = 0
     user.locked_until = None
     user.last_login = datetime.now(timezone.utc)
+    await audit_service.log_action(
+        db, user.id, AdminActionType.LOGIN, "auth", ip_address=ip_address,
+    )
 
     # Generate tokens
     access_token = create_access_token({

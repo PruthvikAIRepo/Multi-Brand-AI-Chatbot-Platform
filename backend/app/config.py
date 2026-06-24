@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -13,6 +14,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-this-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # First Super Admin bootstrap (read by app.seed; never hardcode credentials)
+    SUPERADMIN_EMAIL: str = ""
+    SUPERADMIN_PASSWORD: str = ""
 
     # LLM Provider (openai or anthropic)
     LLM_PROVIDER: str = "openai"
@@ -51,6 +56,8 @@ class Settings(BaseSettings):
 
     # Rate limiting
     RATE_LIMIT_PER_IP: int = 60
+    AUTH_RATE_LIMIT_PER_IP: int = 10          # login/forgot/reset attempts per IP
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 300  # ...within this window (5 min)
 
     # Email (SMTP)
     SMTP_HOST: str = ""
@@ -63,11 +70,35 @@ class Settings(BaseSettings):
 
     # Server
     CORS_ORIGINS: str = "http://localhost:3000"
-    ENVIRONMENT: str = "production"
+    # Default to development so local runs work out of the box; production
+    # deploys MUST set ENVIRONMENT=production (which activates the fail-closed
+    # secret check below and disables verbose error output).
+    ENVIRONMENT: str = "development"
 
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
+    @model_validator(mode="after")
+    def _fail_closed_on_default_secrets(self) -> "Settings":
+        """Refuse to boot outside development if security-critical secrets are
+        still the committed defaults or empty. Prevents shipping a deploy where
+        admin JWTs can be forged or stored secrets/PII can be trivially decrypted."""
+        if self.ENVIRONMENT == "development":
+            return self
+
+        insecure = {
+            "SECRET_KEY": ("change-this-in-production", ""),
+            "ENCRYPTION_KEY": ("change-this-32-byte-key-in-prod!", ""),
+        }
+        offenders = [name for name, bad in insecure.items() if getattr(self, name) in bad]
+        if offenders:
+            raise ValueError(
+                f"Refusing to start in ENVIRONMENT='{self.ENVIRONMENT}': "
+                f"{', '.join(offenders)} must be set to a strong, non-default value. "
+                "Set them via environment variables before deploying."
+            )
+        return self
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

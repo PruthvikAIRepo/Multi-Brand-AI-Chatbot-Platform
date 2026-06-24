@@ -72,11 +72,15 @@ ALL_BRAND_PERMISSIONS = [
 ]
 
 
-async def get_current_user(
+async def get_authenticated_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Extract and validate user from JWT token. Used on every protected route."""
+    """Resolve the user from a valid JWT, ignoring the must-change-password gate.
+
+    Use this ONLY on the escape-hatch endpoints a user needs while still
+    flagged must_change_password (view self, change password, logout).
+    Every other protected route must use get_current_user."""
     payload = decode_access_token(credentials.credentials)
     if not payload:
         raise UnauthorizedError()
@@ -95,6 +99,22 @@ async def get_current_user(
     if not user or not user.is_active:
         raise UnauthorizedError("Account not found or deactivated")
 
+    return user
+
+
+async def get_current_user(
+    user: User = Depends(get_authenticated_user),
+) -> User:
+    """Standard dependency for every protected route.
+
+    Builds on get_authenticated_user and additionally enforces that the user
+    has cleared the must_change_password gate. require_super_admin and
+    require_brand_access depend on this, so the whole admin surface inherits
+    the gate automatically."""
+    if user.must_change_password:
+        raise ForbiddenError(
+            "Password change required. Set a new password via /auth/change-password before continuing."
+        )
     return user
 
 
