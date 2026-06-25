@@ -33,6 +33,7 @@ class RefreshRequest(BaseModel):
 
 class RefreshResponse(BaseModel):
     access_token: str
+    refresh_token: str  # rotated: the old refresh token is revoked on use
     token_type: str = "bearer"
 
 
