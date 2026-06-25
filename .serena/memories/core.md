@@ -25,6 +25,7 @@ leak. (Verified: the content-CRUD layer does this correctly via `(id, brand_id)`
 - `mem:auth_and_rbac` — Super Admin / Admin model, permissions, login flow (current).
 - `mem:encryption` — at-rest encryption (AES-256-GCM) + key rotation + secret handling.
 - `mem:conventions` — coding/testing/deploy conventions.
+- `mem:deployment` — GCP (Cloud Run + Cloud SQL) deploy artifacts & runbook.
 - `mem:security_status` — open security issues (#3–#14) and what's fixed.
 - `mem:memory_maintenance` — how to keep these memories healthy.
 
