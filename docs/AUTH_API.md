@@ -31,7 +31,7 @@ Access token lifetime ~30 min. Use the refresh token to get a new one.
 | Method | Path | Auth | Body | Notes |
 |---|---|---|---|---|
 | POST | `/auth/login` | public | `{ email, password }` | Rate-limited per IP. |
-| POST | `/auth/refresh` | public | `{ refresh_token }` | **Rotates**: returns a new access token **and a new refresh token**; the presented refresh token is revoked. Store the new one and discard the old. Presenting a revoked token logs out all sessions (reuse detection). |
+| POST | `/auth/refresh` | public | `{ refresh_token }` | **Rotates**: returns a new access token **and a new refresh token**; the presented token is revoked. Store the new one, discard the old. **Replaying a rotated token** (theft signal) logs out all sessions → `401` "reuse detected". A **logged-out / expired** token just returns `401` "Invalid or expired refresh token". |
 | POST | `/auth/change-password` | Bearer | `{ current_password, new_password }` | Allowed even while `must_change_password`. |
 | POST | `/auth/forgot-password` | public | `{ email }` | Always 200 (no enumeration). Rate-limited. |
 | POST | `/auth/reset-password` | public | `{ token, new_password }` | Token from email; single-use, 1-hour expiry. |

@@ -38,8 +38,11 @@ See `mem:architecture_backend` for the dependency chain.
    before raising (else get_db rollback would discard it — that was bug #3).
 3. Unknown email runs a dummy bcrypt verify to equalize timing (anti-enumeration, #9).
 4. Issues JWT access (30m) + refresh (7d, stored as sha256 hash). `/auth/refresh`
-   **rotates** the refresh token (old revoked, new issued) and detects reuse of a
-   revoked token by revoking all the user's tokens.
+   **rotates** the refresh token (old marked revoked-but-present as a tripwire, new
+   issued). Replaying a rotated token => reuse detection => DELETE all the user's
+   tokens. Logout / password-change / reset / deactivate **delete** their tokens
+   (not flag revoked), so a later refresh with those reads as plain "invalid",
+   never as false "reuse". (See Unit-4 follow-up.)
 5. **must_change_password gate**: a freshly seeded/invited user can only hit `/auth/me`,
    `/auth/change-password`, `/auth/logout` until they change the password (enforced in
    `get_current_user`). First Super Admin is seeded with this flag set.

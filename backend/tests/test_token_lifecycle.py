@@ -39,8 +39,10 @@ class FakeSession:
         self.added = []
         self.commits = 0
         self.flushes = 0
+        self.executed = []   # class name of each executed statement (e.g. "Select", "Delete")
 
     async def execute(self, *a, **k):
+        self.executed.append(type(a[0]).__name__ if a else None)
         return FakeResult(self._scalar, self._items)
 
     def add(self, obj):
@@ -95,15 +97,23 @@ async def test_refresh_rejects_unknown_token():
         await auth_service.refresh_access_token(session, "nope")
 
 
-async def test_refresh_reuse_detection_revokes_all():
-    user = stub_user()
-    presented = stub_refresh_token(revoked=True, user=user)   # already revoked => reuse
-    others = [stub_refresh_token(user=user), stub_refresh_token(user=user)]
-    session = FakeSession(scalar=presented, items=others)
+async def test_refresh_reuse_detection_deletes_all():
+    # A rotated token (revoked but still present) replayed => reuse/theft.
+    presented = stub_refresh_token(revoked=True)
+    session = FakeSession(scalar=presented)
     with pytest.raises(UnauthorizedError):
         await auth_service.refresh_access_token(session, "stolen")
-    assert all(t.revoked for t in others)        # every active token nuked
+    assert "Delete" in session.executed          # all the user's tokens deleted
     assert session.commits == 1                  # persisted before raising
+
+
+async def test_logout_deletes_the_token():
+    # Logout deletes (not flags) the token, so a later refresh reads as
+    # 'invalid' rather than tripping reuse detection.
+    session = FakeSession()
+    await auth_service.logout(session, "raw-refresh")
+    assert "Delete" in session.executed
+    assert session.flushes == 1
 
 
 async def test_refresh_rejects_expired_token():

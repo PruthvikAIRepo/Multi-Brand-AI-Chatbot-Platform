@@ -1,7 +1,7 @@
 import secrets
 import string
 from uuid import UUID
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.user import User, UserBrandAssignment, RefreshToken
@@ -221,15 +221,9 @@ async def deactivate_user(db: AsyncSession, user_id: UUID, current_user_id: UUID
     was_active = user.is_active
     user.is_active = False
 
-    # Revoke all refresh tokens so they can't get new access tokens
-    tokens = await db.execute(
-        select(RefreshToken).where(
-            RefreshToken.user_id == user_id,
-            RefreshToken.revoked == False,
-        )
-    )
-    for token in tokens.scalars().all():
-        token.revoked = True
+    # Delete all refresh tokens so they can't get new access tokens (delete, not
+    # flag-revoked, so a later refresh reads as 'invalid' rather than reuse).
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user_id))
 
     await db.flush()
 
