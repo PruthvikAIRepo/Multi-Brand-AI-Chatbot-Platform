@@ -25,6 +25,8 @@ See `mem:architecture_backend` for the dependency chain.
 - Assign/replace brands (`PUT /users/{id}/brands`).
 - Deactivate/activate (`POST /users/{id}/deactivate|activate`) = revoke access.
 - Unlock a brute-force lockout: `POST /users/{id}/unlock` (Super Admin).
+- Send a password-reset email to a user: `POST /users/{id}/reset-password` (Super Admin) —
+  reuses `forgot_password`; emails a single-use token, never sets/reveals a password.
 - View any user's activity logs: `GET /logs/admin-activity?user_id=...` (Super Admin).
 - Reset own password: any authenticated user (`/auth/change-password`).
 - All mutating user-mgmt actions are audited with actor, **IP**, and before/after state
@@ -35,7 +37,9 @@ See `mem:architecture_backend` for the dependency chain.
 2. Brute-force lockout: 5 fails → 15-min lock; the failed-attempt state is **committed**
    before raising (else get_db rollback would discard it — that was bug #3).
 3. Unknown email runs a dummy bcrypt verify to equalize timing (anti-enumeration, #9).
-4. Issues JWT access (30m) + refresh (7d, stored as sha256 hash).
+4. Issues JWT access (30m) + refresh (7d, stored as sha256 hash). `/auth/refresh`
+   **rotates** the refresh token (old revoked, new issued) and detects reuse of a
+   revoked token by revoking all the user's tokens.
 5. **must_change_password gate**: a freshly seeded/invited user can only hit `/auth/me`,
    `/auth/change-password`, `/auth/logout` until they change the password (enforced in
    `get_current_user`). First Super Admin is seeded with this flag set.
@@ -47,5 +51,10 @@ sync or mixed-case admins can't log in.
 
 ## Known gaps (see `mem:security_status`)
 Distinct "Account locked"/"deactivated" messages still reveal account existence (UX vs
-enumeration tradeoff). No refresh-token rotation yet. (User-management audit IP/before-after
-was completed in Unit 2.)
+enumeration tradeoff). Access tokens aren't revocable before their 30m expiry (no denylist;
+logout only revokes the refresh token). (Refresh-token rotation + reuse detection and
+user-management audit IP/before-after are done — Units 2 & 4.)
+
+## Operational dependency
+The password-reset and invite flows send email via `email_service`, which **silently no-ops
+if `SMTP_HOST` is not configured**. SMTP must be set in production for these to work.

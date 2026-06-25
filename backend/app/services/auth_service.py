@@ -107,35 +107,55 @@ async def authenticate_user(
 
 
 async def refresh_access_token(db: AsyncSession, raw_refresh_token: str) -> dict:
-    """Generate new access token using a valid refresh token."""
+    """Exchange a refresh token for a new access token AND a new refresh token
+    (rotation), revoking the presented token. Includes reuse detection: if an
+    already-revoked token is presented (a sign of theft/replay), ALL of the
+    user's refresh tokens are revoked, forcing a fresh login."""
     token_hash = hash_token(raw_refresh_token)
 
+    # Look up WITHOUT the revoked filter so a revoked token can be detected as reuse.
     result = await db.execute(
         select(RefreshToken)
         .options(selectinload(RefreshToken.user))
-        .where(
-            RefreshToken.token_hash == token_hash,
-            RefreshToken.revoked == False,
-            RefreshToken.expires_at > datetime.now(timezone.utc),
-        )
+        .where(RefreshToken.token_hash == token_hash)
     )
     refresh_token = result.scalar_one_or_none()
 
     if not refresh_token:
         raise UnauthorizedError("Invalid or expired refresh token")
 
+    # Reuse detection: a revoked token presented again => likely compromised.
+    if refresh_token.revoked:
+        await _revoke_all_refresh_tokens(db, refresh_token.user_id)
+        # Commit the mass-revocation before raising (get_db rolls back on raise).
+        await db.commit()
+        raise UnauthorizedError("Refresh token reuse detected. Please log in again.")
+
+    if refresh_token.expires_at <= datetime.now(timezone.utc):
+        raise UnauthorizedError("Invalid or expired refresh token")
+
     if not refresh_token.user.is_active:
         raise UnauthorizedError("Account has been deactivated")
 
-    # Generate new access token
+    # Rotate: revoke the presented token and issue a fresh refresh token.
+    refresh_token.revoked = True
+
     access_token = create_access_token({
         "sub": str(refresh_token.user.id),
         "email": refresh_token.user.email,
         "role": refresh_token.user.role.value,
     })
+    raw_refresh, refresh_hash = create_refresh_token()
+    db.add(RefreshToken(
+        user_id=refresh_token.user_id,
+        token_hash=refresh_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    ))
+    await db.flush()
 
     return {
         "access_token": access_token,
+        "refresh_token": raw_refresh,
         "token_type": "bearer",
     }
 

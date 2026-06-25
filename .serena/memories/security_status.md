@@ -24,6 +24,17 @@ From the foundation review (2026-06). GitHub issues #3–#14 (labels `bug`,`secu
 - `invite_user` lowercases email (consistency with login; prevents mixed-case lockout).
 - Frontend hand-off doc: `docs/AUTH_API.md`.
 
+### Unit 4 (login completion) — DONE on branch feature/login-completion
+- **Refresh-token rotation + reuse detection** — `/auth/refresh` rotates (old revoked, new
+  issued); a revoked token presented again revokes ALL the user's tokens.
+- **Stop echoing credentials** — invite `temp_password` is no longer in the API response in
+  production (dev-only, like the reset token); delivered by email.
+- **Super-Admin password-reset** — `POST /users/{id}/reset-password` emails a single-use reset
+  link (reuses `forgot_password`; never sets/reveals a password).
+- Tests: `backend/tests/test_token_lifecycle.py` (8). Full suite 38 passing.
+- The Super-Admin/Admin login architecture is now functionally complete (remaining: optional
+  access-token denylist + generic lock messages; SMTP config is ops; UI is frontend).
+
 ### Unit 3 (at-rest encryption) — DONE on branch feature/encryption-hardening
 - **#7 fixed** — `core/encryption.py` now AES-256-GCM (authenticated) + HKDF-SHA256 key
   derivation + multi-key rotation (`ENCRYPTION_KEYS_RETIRED`), with legacy-CBC fallback so
@@ -43,8 +54,8 @@ From the foundation review (2026-06). GitHub issues #3–#14 (labels `bug`,`secu
 - **#14 MEDIUM cluster** — no hard fallback on empty RAG (hallucination); compliance skipped
   on LLM-error branch; unbounded NumPy vector scan; blind setattr mass-assignment in
   brand-config updaters; broadcast notification mark-read mutates shared row; invite defaults
-  to all 32 perms (least-privilege); no refresh-token rotation; temp password echoed in invite
-  response; lead CSV export not audit-logged; `asyncio.run()` per Celery task.
+  to all 32 perms (least-privilege); lead CSV export not audit-logged; `asyncio.run()` per
+  Celery task. (Refresh-token rotation + invite temp-password echo were resolved in Unit 4.)
 
 ## Verdict
 Brand isolation, RBAC lockdown (user/secret mgmt = Super-Admin-only, live role re-read),

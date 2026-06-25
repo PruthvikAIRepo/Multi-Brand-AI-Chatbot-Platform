@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.user import InviteUserRequest, UpdateUserBrandsRequest, UpdateUserPermissionsRequest
-from app.services import user_service, audit_service
+from app.services import user_service, audit_service, auth_service
 from app.core.permissions import require_super_admin
 from app.core.request_utils import get_client_ip
+from app.config import get_settings
 from app.models.enums import AdminActionType
 from app.core.response import api_response, paginated_response
 from app.models.user import User
@@ -30,6 +31,10 @@ async def invite_user(
         ip_address=get_client_ip(http_request),
         after_state={"role": result["role"], "brands": result["assigned_brand_ids"]},
     )
+    # Never echo the temp password in production — it is delivered by email.
+    # In development we return it so local testing works without SMTP.
+    if get_settings().ENVIRONMENT != "development":
+        result.pop("temp_password", None)
     return api_response(data=result, message="User invited successfully")
 
 
@@ -162,3 +167,26 @@ async def unlock_user(
         after_state={"was_locked": result["was_locked"], "unlocked": True},
     )
     return api_response(data=result, message="Account unlocked")
+
+
+@router.post("/{user_id}/reset-password", response_model=dict)
+async def admin_reset_password(
+    user_id: UUID,
+    http_request: Request,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a password-reset email to a user (Super Admin only).
+
+    Reuses the standard reset flow: it emails a single-use, time-limited token to
+    the user's address and never sets or reveals a password to the Super Admin.
+    Useful for helping a locked-out admin or resending onboarding. No-op (still 200)
+    if the account is inactive or absent, to avoid leaking which accounts exist."""
+    user = await user_service.get_user(db, user_id)  # 404 if the id is invalid
+    await auth_service.forgot_password(db, user["email"])
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.UPDATED, "user_password_reset",
+        entity_id=user_id, entity_name=user["email"],
+        ip_address=get_client_ip(http_request),
+    )
+    return api_response(message="Password reset email sent if the account is active")
