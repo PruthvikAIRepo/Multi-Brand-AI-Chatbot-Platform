@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.user import User, RefreshToken, PasswordResetToken
@@ -248,26 +248,19 @@ async def reset_password(db: AsyncSession, raw_token: str, new_password: str) ->
 
 
 async def logout(db: AsyncSession, raw_refresh_token: str) -> None:
-    """Revoke a specific refresh token (logout from current device)."""
+    """Log out from the current device by DELETING the refresh token.
+
+    We delete (rather than flag revoked) so a later refresh attempt with this
+    token reads as a plain 'invalid/expired' token instead of tripping reuse
+    detection — reuse detection must fire only for replayed *rotated* tokens."""
     token_hash = hash_token(raw_refresh_token)
-
-    result = await db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-    )
-    refresh_token = result.scalar_one_or_none()
-
-    if refresh_token:
-        refresh_token.revoked = True
-        await db.flush()
+    await db.execute(delete(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    await db.flush()
 
 
 async def _revoke_all_refresh_tokens(db: AsyncSession, user_id: UUID) -> None:
-    """Revoke all refresh tokens for a user (used on password change/reset)."""
-    result = await db.execute(
-        select(RefreshToken).where(
-            RefreshToken.user_id == user_id,
-            RefreshToken.revoked == False,
-        )
-    )
-    for token in result.scalars().all():
-        token.revoked = True
+    """DELETE all of a user's refresh tokens (logout-all on password change/reset
+    and on reuse detection). Deleting keeps these benign/forced invalidations
+    distinct from the single revoked-but-present row a rotation leaves behind as
+    the reuse tripwire (see refresh_access_token)."""
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user_id))
