@@ -1,5 +1,32 @@
 # Deployment
 
+## LIVE (2026-07-04) ✅
+- **Service:** Cloud Run `chatbot-api`, region `us-central1`, project `anurion-ai-platform`.
+- **URL:** https://chatbot-api-721332751968.us-central1.run.app  (Swagger at `/docs`).
+- **DB:** Cloud SQL `chatbot-pg` (Postgres 15, db-f1-micro), DB `chatbot`, pgvector 0.8.1,
+  schema migrated (`7c8ed624ae89`), Super Admin seeded (`kinnrisoni777@gmail.com`, must-change).
+- **Config:** injected as Cloud Run **env vars** (ENVIRONMENT=production, SECRET_KEY,
+  ENCRYPTION_KEY, DATABASE_URL socket form, CORS_ORIGINS=*). NOT in Secret Manager (see IAM note).
+- **Verified live:** `/health` db=ok (redis=error, expected — no Memorystore; login fails open),
+  `/docs`=200, `/auth/login` works (must_change_password=true).
+- **IAM:** `kinnrisoni777@gmail.com` is now **Owner** (accepted the invite). Runtime/compute SA
+  granted cloudsql.client + cloudbuild.builds.builder + storage.admin + logging.logWriter +
+  artifactregistry.writer. Future deploys need no new access.
+
+## Redeploy
+`gcloud run deploy chatbot-api --source backend --region us-central1 --add-cloudsql-instances
+anurion-ai-platform:us-central1:chatbot-pg` (env vars are retained across deploys; omit
+--env-vars-file unless changing them). Needs `backend/.gcloudignore` (excludes venv) present.
+
+## Open follow-ups (optional, non-blocking)
+- `backend/.gcloudignore` is created locally but **not yet committed** — commit it so redeploys stay lean.
+- Lock CORS to the real admin-frontend domain when known (currently `*`).
+- Add Memorystore (Redis) + set REDIS_URL before enabling chat rate-limiting.
+- Move secrets from Cloud Run env → Secret Manager once a least-privilege runtime SA is set up
+  (now possible with Owner; was blocked under Editor).
+
+---
+
 See `mem:core`. Target: **GCP** (client's project; owner has Editor role).
 
 ## Artifacts (in repo)
