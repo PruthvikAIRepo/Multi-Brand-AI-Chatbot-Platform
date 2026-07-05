@@ -1,0 +1,12 @@
+# Keep the Cloud Build upload small — exclude local cruft (Dockerfile build still
+# COPYs what it needs: requirements.txt, app/, alembic/, alembic.ini).
+venv/
+.venv/
+.env
+.env.*
+**/__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+.git/
+*.md
