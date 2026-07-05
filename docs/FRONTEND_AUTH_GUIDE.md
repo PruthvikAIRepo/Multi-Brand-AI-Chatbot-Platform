@@ -1,8 +1,12 @@
 # Frontend Developer Guide — Authentication (Postman)
 
-Everything you need to integrate the **Super Admin / Admin login** for the Multi-Brand AI
+Everything you need to integrate the **login / authentication** for the Multi-Brand AI
 Chatbot admin panel. This covers making the calls in Postman, the token model, and the
 **one-time password-change flow** you must handle in the UI.
+
+> Scope: this guide covers **only the authentication endpoints**, which are tested and live.
+> Other admin endpoints (users, brands, products, etc.) are still being finalized and will be
+> documented once verified — please don't build against them yet.
 
 ---
 
@@ -16,12 +20,12 @@ Chatbot admin panel. This covers making the calls in Postman, the token model, a
 | **Health check** | `GET /health` → `{"status":"...","checks":{"api":"ok","database":"ok",...}}` |
 
 > **Tip:** In Postman, click **Import → Link** and paste the **openapi.json** URL above — it
-> auto-generates the entire request collection for you. Then just set the variables below.
+> auto-generates the request collection for you. Then just set the variables below.
 
 ### Your test login
-A Super Admin account has been created for you. **Get the email + temporary password from
-Pruthvik** (not stored in this doc for security). On first login you'll be required to change
-the password — see Section 4.
+A test account has been created for you. **Get the email + temporary password from Pruthvik**
+(not stored in this doc for security). On first login you'll be required to change the
+password — see Section 4.
 
 ---
 
@@ -55,7 +59,7 @@ Now every login/refresh auto-saves the tokens, and protected requests can use
 
 **Success:**
 ```json
-{ "data": { ... }, "message": "Success", "meta": { ... } }   // meta only on lists
+{ "data": { ... }, "message": "Success" }
 ```
 **Error:**
 ```json
@@ -115,7 +119,13 @@ Success `200`: `"Password changed successfully"`. The gate is now cleared for th
 ```
 Use `role` for menu rendering, and `assigned_brands` to know which brands an Admin can see.
 
-### Step 4 — Keep the session alive (token refresh)
+### Step 4 — Update own profile (optional)
+`PUT {{base_url}}/auth/me` (Bearer)
+```json
+{ "full_name": "New Name" }
+```
+
+### Step 5 — Keep the session alive (token refresh)
 Access tokens expire in **30 minutes**. Before/after expiry, call:
 `POST {{base_url}}/auth/refresh`
 ```json
@@ -126,7 +136,7 @@ Returns a **new** `access_token` **and** a **new** `refresh_token` — store bot
 > returns `401 "reuse detected"` and logs the user out of all sessions (theft protection).
 > A normal logged-out/expired token just returns `401 "Invalid or expired refresh token"`.
 
-### Step 5 — Logout
+### Step 6 — Logout
 `POST {{base_url}}/auth/logout`
 ```json
 { "refresh_token": "{{refresh_token}}" }
@@ -139,48 +149,26 @@ Revokes that refresh token. (Clear the stored tokens in the app.)
 
 ---
 
-## 5. User Management (Super Admin only)
+## 5. Auth endpoints — quick reference (the only endpoints to build against for now)
 
-All require a Bearer token for a **Super Admin**. Non-super-admins get `403`.
-
-### List users  ✅ (tested)
-`GET {{base_url}}/users?page=1&per_page=20`
-```json
-{
-  "data": [
-    {
-      "id": "uuid", "email": "...", "full_name": "...",
-      "role": "super_admin", "is_active": true, "must_change_password": false,
-      "last_login": "2026-07-05T19:59:12Z", "created_at": "...",
-      "assigned_brands": [ { "id": "uuid", "name": "GlowSkin", "permissions": ["products.view", ...] } ]
-    }
-  ],
-  "message": "Success",
-  "meta": { "total": 1, "page": 1, "per_page": 20, "total_pages": 1 }
-}
-```
-
-### Other user endpoints (available)
-| Method | Endpoint | Purpose |
-|---|---|---|
-| POST | `/users` | Invite an admin + assign brand(s) (requires at least one brand to exist) |
-| GET | `/users/{id}` | One user's details |
-| GET | `/users/permissions/all` | The full list of assignable permission strings (for checkbox UI) |
-| PUT | `/users/{id}/brands` | Change a user's brand assignments |
-| PUT | `/users/{id}/brands/{brand_id}/permissions` | Narrow a user's permissions on a brand |
-| POST | `/users/{id}/deactivate` \| `/activate` \| `/unlock` | Revoke / restore / clear lockout |
-| POST | `/users/{id}/reset-password` | Send that user a password-reset email |
-
-> Note: inviting an Admin needs an existing **brand** to assign. Brand endpoints are being
-> finalized next — until then, `POST /users` will return "must be assigned to at least one
-> brand" if no brand exists.
+| Method | Endpoint | Auth | Purpose |
+|---|---|---|---|
+| POST | `/auth/login` | public | Log in → tokens + `must_change_password` |
+| POST | `/auth/refresh` | public | Rotate tokens (new access + refresh) |
+| POST | `/auth/change-password` | Bearer | Change own password (clears the first-login gate) |
+| POST | `/auth/forgot-password` | public | Request a reset email |
+| POST | `/auth/reset-password` | public | Reset password using the emailed token |
+| POST | `/auth/logout` | public | Revoke the refresh token |
+| GET | `/auth/me` | Bearer | Current user + role + assigned brands |
+| PUT | `/auth/me` | Bearer | Update own full name |
+| GET | `/health` | public | Service health check |
 
 ---
 
 ## 6. Status codes
 `200` OK · `400` bad request · `401` not authenticated / bad login / locked · `403` forbidden
-(wrong role, missing brand permission, **or password-change-required**) · `404` not found ·
-`409` already exists · `422` validation error · `429` too many attempts (rate limited).
+(**or password-change-required**) · `404` not found · `422` validation error ·
+`429` too many attempts (rate limited).
 
 ## 7. Notes
 - All timestamps are UTC ISO-8601.
@@ -191,5 +179,5 @@ All require a Bearer token for a **Super Admin**. Non-super-admins get `403`.
 ---
 
 **Quickest start:** import the **openapi.json** into Postman, set the 3 environment variables,
-add the token-capture script to the Login request, then walk Steps 1→5 above. The live
+add the token-capture script to the Login request, then walk Steps 1→6 above. The live
 **Swagger** page is also fully interactive if you prefer clicking to test.
