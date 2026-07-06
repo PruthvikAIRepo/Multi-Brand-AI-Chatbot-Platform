@@ -120,6 +120,7 @@ When a new admin is invited, they must change their password on first login.
 | Secondary color | Color picker + hex code input |
 | Accent color | Color picker + hex code input |
 | Description | Textarea — brand identity statement |
+| Currency | Dropdown (ISO 4217: USD, EUR, INR, …), default USD. Applies to all of this brand's product prices — products store only a numeric `price`; the brand supplies the currency. |
 | Active / Inactive toggle | |
 | "Save" button | |
 | "Delete Brand" button | Super Admin only. Shows confirmation: "This will permanently delete all brand data." |
