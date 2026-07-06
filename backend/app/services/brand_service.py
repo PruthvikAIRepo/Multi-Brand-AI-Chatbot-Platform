@@ -57,7 +57,7 @@ async def create_brand(db: AsyncSession, data: dict) -> dict:
         secondary_color=data.get("secondary_color"),
         accent_color=data.get("accent_color"),
         description=data.get("description"),
-        currency=data.get("currency", "INR"),
+        currency=data.get("currency", "USD"),
     )
     db.add(brand)
     await db.flush()
@@ -169,8 +169,10 @@ async def update_brand(db: AsyncSession, brand_id: UUID, data: dict) -> dict:
         brand.name = data["name"]
         brand.slug = await _ensure_unique_slug(db, _generate_slug(data["name"]), brand_id)
 
-    # Update fields — allows setting to None (e.g., clearing logo_url)
-    for field in ["logo_url", "primary_color", "secondary_color", "accent_color", "description", "currency", "is_active"]:
+    # Update fields — allows setting to None (e.g., clearing logo_url).
+    # NOTE: is_active is deliberately excluded — brand activation/deactivation is a
+    # Super-Admin-only action handled by set_brand_active (see the activate/deactivate routes).
+    for field in ["logo_url", "primary_color", "secondary_color", "accent_color", "description", "currency"]:
         if field in data:
             setattr(brand, field, data[field])
 
@@ -252,15 +254,31 @@ async def update_chatbot_status(db: AsyncSession, brand_id: UUID, status) -> dic
     return {"brand_id": str(brand_id), "chatbot_status": brand.chatbot_status.value}
 
 
-async def delete_brand(db: AsyncSession, brand_id: UUID) -> None:
-    """Delete a brand and all related data (CASCADE). Irreversible."""
+async def set_brand_active(db: AsyncSession, brand_id: UUID, is_active: bool) -> dict:
+    """Activate or deactivate a brand (Super Admin only). Deactivating takes the
+    brand's public chatbot/widget offline."""
     result = await db.execute(select(Brand).where(Brand.id == brand_id))
     brand = result.scalar_one_or_none()
     if not brand:
         raise NotFoundError("Brand", str(brand_id))
 
+    brand.is_active = is_active
+    await db.flush()
+    return {"id": str(brand.id), "name": brand.name, "is_active": brand.is_active}
+
+
+async def delete_brand(db: AsyncSession, brand_id: UUID) -> dict:
+    """Delete a brand and all related data (CASCADE). Irreversible.
+    Returns the deleted brand's id + name for the audit log."""
+    result = await db.execute(select(Brand).where(Brand.id == brand_id))
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise NotFoundError("Brand", str(brand_id))
+
+    name = brand.name
     await db.delete(brand)
     await db.flush()
+    return {"id": str(brand_id), "name": name}
 
 
 # --- Helper functions ---

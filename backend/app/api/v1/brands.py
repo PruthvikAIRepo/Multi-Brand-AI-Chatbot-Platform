@@ -82,12 +82,47 @@ async def delete_brand(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a brand and ALL related data. Super Admin only. Irreversible."""
+    brand = await brand_service.get_brand(db, brand_id)  # 404 if missing; capture name
     await audit_service.log_action(
         db, current_user.id, AdminActionType.DELETED, "brand",
-        entity_id=brand_id, brand_id=brand_id,
+        entity_id=brand_id, brand_id=brand_id, entity_name=brand["name"],
     )
     await brand_service.delete_brand(db, brand_id)
     return api_response(message="Brand deleted successfully")
+
+
+@router.post("/{brand_id}/activate", response_model=dict)
+async def activate_brand(
+    brand_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Activate a brand (brings its chatbot/widget online). Super Admin only."""
+    result = await brand_service.set_brand_active(db, brand_id, True)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.ENABLED, "brand",
+        entity_id=brand_id, brand_id=brand_id, entity_name=result["name"],
+        after_state={"is_active": True},
+    )
+    await invalidate_brand(brand_id)
+    return api_response(data=result, message="Brand activated")
+
+
+@router.post("/{brand_id}/deactivate", response_model=dict)
+async def deactivate_brand(
+    brand_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deactivate a brand (takes its chatbot/widget offline). Super Admin only."""
+    result = await brand_service.set_brand_active(db, brand_id, False)
+    await audit_service.log_action(
+        db, current_user.id, AdminActionType.DISABLED, "brand",
+        entity_id=brand_id, brand_id=brand_id, entity_name=result["name"],
+        after_state={"is_active": False},
+    )
+    await invalidate_brand(brand_id)
+    return api_response(data=result, message="Brand deactivated")
 
 
 # --- Brand Config Endpoints ---

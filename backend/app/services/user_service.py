@@ -51,9 +51,11 @@ async def invite_user(
         if count != len(brand_ids):
             raise BadRequestError("One or more brand IDs are invalid")
 
-    # Admin role requires at least one brand assignment
-    if not brand_ids:
-        raise BadRequestError("Admin users must be assigned to at least one brand")
+    # Brand assignment is OPTIONAL at creation (SRS §21.4 / UI §23: only email is
+    # required). The Super Admin may allot brands now, later, or not at all — an
+    # admin with no brands is a valid "pending assignment" state (sees nothing
+    # until a brand is assigned). Brands are assigned/changed anytime via
+    # update_user_brands.
 
     # Generate temporary password
     temp_password = _generate_temp_password()
@@ -178,15 +180,14 @@ async def update_user_brands(db: AsyncSession, user_id: UUID, brand_ids: list[UU
     # Deduplicate
     brand_ids = list(set(brand_ids))
 
-    if not brand_ids:
-        raise BadRequestError("Admin users must be assigned to at least one brand")
-
-    # Validate brand_ids
-    result = await db.execute(
-        select(func.count()).select_from(Brand).where(Brand.id.in_(brand_ids))
-    )
-    if result.scalar() != len(brand_ids):
-        raise BadRequestError("One or more brand IDs are invalid")
+    # Empty list is allowed — it un-assigns all brands (parks the admin). The
+    # Super Admin controls assignment freely (assign/reassign/remove anytime).
+    if brand_ids:
+        result = await db.execute(
+            select(func.count()).select_from(Brand).where(Brand.id.in_(brand_ids))
+        )
+        if result.scalar() != len(brand_ids):
+            raise BadRequestError("One or more brand IDs are invalid")
 
     # Remove existing assignments
     result = await db.execute(

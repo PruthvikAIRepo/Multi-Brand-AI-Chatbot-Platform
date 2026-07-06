@@ -21,8 +21,14 @@ See `mem:architecture_backend` for the dependency chain.
   Phase 2** — keep the capability, default-all for now. Invite has no per-permission picker yet.
 
 ## User management actions (SRS §21.4) — all Super-Admin-only except self password
-- Invite admin (`POST /users`) — also assigns brand(s) at invite time (≥1 brand required).
-- Assign/replace brands (`PUT /users/{id}/brands`).
+- Invite admin (`POST /users`) — **brand assignment is OPTIONAL** (only email required, per
+  SRS §21.4 / UI §23). An admin with no brands is a valid "parked" state (sees nothing until
+  assigned). Assign now, later, or not at all.
+- Assign/replace/remove brands anytime (`PUT /users/{id}/brands`) — empty list un-assigns all.
+- Brand lifecycle is Super-Admin-only: create/edit/**delete** (`/brands`, cascade delete) and
+  **activate/deactivate** (`POST /brands/{id}/activate|deactivate`). `is_active` is NOT
+  editable via the general brand update — deactivating takes the chatbot offline (≈ soft-delete).
+- Default brand currency = **USD**. Brand config update schemas use `extra=forbid`.
 - Deactivate/activate (`POST /users/{id}/deactivate|activate`) = revoke access.
 - Unlock a brute-force lockout: `POST /users/{id}/unlock` (Super Admin).
 - Send a password-reset email to a user: `POST /users/{id}/reset-password` (Super Admin) —
