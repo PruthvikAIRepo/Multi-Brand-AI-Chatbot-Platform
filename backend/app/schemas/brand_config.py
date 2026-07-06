@@ -7,6 +7,7 @@ from app.models.enums import (
 
 
 class BrandConfigUpdateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     response_length: ResponseLength | None = None
     max_tokens: int | None = Field(None, ge=100, le=4000)
     rag_similarity_threshold: float | None = Field(None, ge=0.0, le=1.0)
@@ -31,6 +32,7 @@ class BrandConfigUpdateRequest(BaseModel):
 
 
 class ToneSettingsUpdateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     emotional_style: EmotionalStyle | None = None
     communication_style: CommunicationStyle | None = None
     emoji_usage: bool | None = None
@@ -45,6 +47,7 @@ class ToneSettingsUpdateRequest(BaseModel):
 
 
 class ModerationConfigUpdateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     sensitivity: ModerationSensitivity | None = None
     response_on_block: ModerationResponse | None = None
     allow_list: list[str] | None = None
@@ -53,6 +56,7 @@ class ModerationConfigUpdateRequest(BaseModel):
 
 
 class ImageStyleUpdateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     image_style_profile: ImageStyleProfile | None = None
     product_card_edges: CardEdges | None = None
     product_card_background_color: str | None = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')

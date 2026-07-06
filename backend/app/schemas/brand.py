@@ -5,6 +5,7 @@ from app.models.enums import ChatbotStatus
 
 
 class BrandCreateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     name: str = Field(..., min_length=1, max_length=255)
     slug: str | None = None  # Auto-generated from name if not provided
     logo_url: str | None = None
@@ -12,10 +13,14 @@ class BrandCreateRequest(BaseModel):
     secondary_color: str | None = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
     accent_color: str | None = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
     description: str | None = None
-    currency: str = Field(default="INR", max_length=3)
+    currency: str = Field(default="USD", max_length=3)
 
 
 class BrandUpdateRequest(BaseModel):
+    # Note: `is_active` is intentionally NOT here — activating/deactivating a brand
+    # is a Super-Admin-only action (see /brands/{id}/activate|deactivate), because
+    # deactivating a brand takes its chatbot offline (≈ soft-delete).
+    model_config = {"extra": "forbid"}
     name: str | None = Field(None, min_length=1, max_length=255)
     logo_url: str | None = None
     primary_color: str | None = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
@@ -23,7 +28,6 @@ class BrandUpdateRequest(BaseModel):
     accent_color: str | None = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
     description: str | None = None
     currency: str | None = Field(None, max_length=3)
-    is_active: bool | None = None
 
 
 class BrandResponse(BaseModel):
